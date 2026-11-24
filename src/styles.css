@@ -1,0 +1,96 @@
+:root {
+  color: #e8e6e3;
+  background: #121418;
+  font-family: "Segoe UI", sans-serif;
+  font-size: 15px;
+  line-height: 1.4;
+}
+
+* { box-sizing: border-box; }
+
+body { margin: 0; }
+
+button, input, select {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  background: #2c3340;
+  border: 1px solid #445;
+  border-radius: 6px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+button:hover { background: #384255; }
+button:disabled { opacity: 0.45; cursor: not-allowed; }
+
+input, select {
+  background: #0e1014;
+  border: 1px solid #3a4250;
+  border-radius: 6px;
+  padding: 6px 8px;
+  width: 100%;
+}
+
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+}
+
+.app { max-width: 1180px; margin: 0 auto; padding: 20px 16px 40px; }
+
+header { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
+header h1 { font-size: 22px; margin: 0 0 4px; }
+header p { margin: 0; color: #a8b0bd; max-width: 62ch; }
+
+.row, .history { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.version { font-variant-numeric: tabular-nums; }
+
+.banner { margin: 12px 0; padding: 8px 10px; border-radius: 6px; }
+.banner.error { background: #3a1d22; color: #ffb4b4; }
+.banner.status { background: #173024; color: #b7ebc9; }
+
+.settings, .panel, .inspector, .timeline {
+  background: #1a1e26;
+  border: 1px solid #2a3140;
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.settings { display: flex; flex-wrap: wrap; gap: 12px; margin: 16px 0; align-items: end; }
+.settings label { min-width: 120px; }
+.layout { display: grid; grid-template-columns: 280px 1fr; gap: 16px; }
+.stack { display: flex; flex-direction: column; gap: 16px; }
+.panel h2, .inspector h2, .timeline h2 { font-size: 15px; margin: 0 0 8px; }
+.hint { color: #a8b0bd; font-size: 13px; margin: 0 0 8px; }
+.form { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.list { list-style: none; padding: 0; margin: 0 0 8px; }
+.list li { padding: 4px 0; border-bottom: 1px solid #2a3140; }
+
+.track { display: grid; grid-template-columns: 140px 1fr; gap: 8px; margin-bottom: 8px; }
+.track-label { display: flex; flex-direction: column; gap: 6px; justify-content: center; }
+.lane { position: relative; height: 56px; background: #101318; border-radius: 6px; overflow: hidden; }
+.clip {
+  position: absolute;
+  top: 8px;
+  height: 40px;
+  border: 0;
+  border-radius: 5px;
+  background: #2f6fed;
+  text-align: left;
+  padding: 4px 6px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.clip small { display: block; color: #d6e2ff; font-size: 11px; }
+.clip.selected { background: #c9862a; }
+.ruler { display: flex; justify-content: space-between; color: #8d97a8; font-size: 12px; margin-bottom: 6px; }
+
+@media (max-width: 800px) {
+  .layout { grid-template-columns: 1fr; }
+  .track { grid-template-columns: 1fr; }
+}
