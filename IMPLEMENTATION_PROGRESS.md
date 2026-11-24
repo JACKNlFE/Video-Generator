@@ -1,7 +1,6 @@
 # Implementation progress
 
 Repository: `JACKNlFE/Video-Generator`  
-Base commit inspected: `15a2dc3a21c9f6809ac65b1d2a3838989241eb58`  
 Times below are America/Chicago (CT).
 
 ## Phase 0 — recorded at the end of the audit
@@ -12,86 +11,99 @@ Completed about 1:48 AM CT on Tuesday 24 Nov 2026.
 
 - Read the full brief at `/cursor/stores/bc-42fc35e1-0af3-4756-bcf3-f497a33b3185/internal/master-build-brief.md` (sections 1–22, 1290 lines).
 - Copied it verbatim to `MASTER_BUILD_BRIEF.md`. `cmp` found no difference. SHA-256 of both files: `5d0a035c65ec7b27fd748fd0c6ae4f50178a6022df0d898488085a3520bd3eb9`.
-- Inspected the whole checkout. Tracked files: `README.md` only (`# Video-Generator` plus a newline, 18 bytes). History: one commit, `Initial commit`.
-- Fetched `origin/main`. Local `HEAD` and `origin/main` both resolve to `15a2dc3a21c9f6809ac65b1d2a3838989241eb58`.
-- Wrote `IMPLEMENTATION_PLAN.md` from that tree.
-- Confirmed the checkout is not a video editor. Phase 1 code was not started during Phase 0.
+- Inspected the whole checkout. Tracked files: `README.md` only. History: one commit, `Initial commit`, at `15a2dc3a21c9f6809ac65b1d2a3838989241eb58`.
+- Fetched `origin/main`. It matched that commit.
+- The checkout was not a video editor. No application code was added during Phase 0.
 
-### Files modified
-
-- `MASTER_BUILD_BRIEF.md` (added, verbatim brief)
-- `IMPLEMENTATION_PLAN.md` (added)
-- `IMPLEMENTATION_PROGRESS.md` (added)
-
-No application source was modified. `README.md` is unchanged.
-
-### Verification
-
-There is no package manifest, no TypeScript project, and no test script in the checkout. The commands below were run in `/agent/repos/Video-Generator` and failed because of that absence. They are not evidence of a product bug.
+### Verification during Phase 0
 
 ```text
-git fetch origin main
-git rev-parse HEAD origin/main
-# 15a2dc3a21c9f6809ac65b1d2a3838989241eb58
-# 15a2dc3a21c9f6809ac65b1d2a3838989241eb58
-
 npm test
 # npm error code ENOENT
 # npm error path /agent/repos/Video-Generator/package.json
-# npm error enoent Could not read package.json
 # exit 254
 
 npx --yes -p typescript@5.9.3 tsc --noEmit --pretty false
-# tsc printed compiler-option help (no tsconfig.json and no source files)
+# tsc printed compiler-option help (no tsconfig.json)
 # exit 1
 ```
 
-`npx --yes typescript@5.9.3 tsc --noEmit --pretty false` was also run and exited 1 with `npm error could not determine executable to run`.
+## Phase 1 — greenfield editor
 
-### Outstanding issues
-
-- The repository description says "Full stack video generation app", and the brief says to extend an existing editor. The tree does not contain one.
-- Filename listings for `JACKNlFE/Lyric-Video-Creator` and `JACKNlFE/Clipper-7.16.26` suggest editor-shaped projects elsewhere on the account. Their source was not audited and was not copied here.
-
-### Recommended next steps
-
-- Identify which existing editor should be extended and open that repository as the workspace.
-- Re-run Phase 0 against that tree before any tool registry work.
-
-## Phase 1 — recorded when the phase was closed
-
-Closed about 1:50 AM CT on Tuesday 24 Nov 2026. No Phase 1 functionality was completed.
+Mark chose to build the editor in this repository. The earlier "Phase 1 stopped, no editor" close is superseded by the work below. Completed about 2:01 AM CT on Tuesday 24 Nov 2026.
 
 ### Completed functionality
 
-None. The phase requires a registry of tools that call existing editing commands, schema validation, authoritative project state, and undo or checkpoints. This checkout has no editing commands, no project document, no history stack, and no authorization layer. Building those would create a new editor. That was explicitly out of scope, so the phase stops with this record.
+An in-memory editor and a Zod tool registry. The page and the tests call `executeTool`. No model and no generative API is called.
 
-The following were not implemented, and are not reported as success:
+Supported tools, each backed by the function of the same name in `src/editor/store.ts`:
 
-- Editing tool registry
-- Connections from tools to manual-editor commands
-- Zod or any other schema package
-- Project state access
-- Undo, redo, or checkpoints
-- Programmatic editing tests
-- Anthropic, Fal.ai, AssemblyAI, or OpenAI clients
-- New editor features, migrations, or deleted workflows
+- `createProject`, `inspectProject`, `inspectTimeline`
+- `setAspectRatio`, `setResolution`, `setFrameRate`
+- `registerMedia` (name, kind, duration only; not a file upload)
+- `addTrack`, `removeTrack` (removing a track also removes its clips)
+- `addClip`, `removeClip`, `moveClip`, `trimClip`, `splitClip`
+- `undo`, `redo`, `createCheckpoint`, `restoreCheckpoint`
 
-### Files modified
+Unknown names return `UNSUPPORTED`. Covered names that fail on purpose: `generateVideo`, `generateCaptions`, `applyEffect`, `exportVideo`, `transcribeAudio`, `importMedia`.
 
-No source files. The only repository files for this phase are the three markdown documents listed under Phase 0. `IMPLEMENTATION_PROGRESS.md` was updated in place with this Phase 1 section.
+The manual page can perform those same edits and shows the timeline, version, errors, undo, redo, and checkpoints.
+
+### Files added
+
+- `package.json`, `package-lock.json`, `tsconfig.json`, `vite.config.ts`, `vitest.config.ts`, `.gitignore`
+- `index.html`, `src/main.tsx`, `src/App.tsx`, `src/styles.css`, `src/vite-env.d.ts`
+- `src/editor/schema.ts`, `src/editor/store.ts`, `src/editor/registry.ts`, `src/editor/browserEditor.ts`, `src/editor/registry.test.ts`
+- `IMPLEMENTATION_PLAN.md` and `IMPLEMENTATION_PROGRESS.md` updated
+
+`MASTER_BUILD_BRIEF.md` and `README.md` were not changed in this phase.
 
 ### Verification
 
-No Phase 1 test was written, because there is no tool implementation to test. The Phase 0 `npm test` and `tsc` commands remain the only test and typecheck runs. Both failed for a missing project, as quoted above. No passing test count is claimed.
+Commands run in `/agent/repos/Video-Generator` after the editor code was in place. Vitest 3.2.7, TypeScript via `tsc`, Vite 6.4.6.
+
+```text
+npm test
+
+> test
+> vitest run
+
+ RUN  v3.2.7 /agent/repos/Video-Generator
+
+ ✓ src/editor/registry.test.ts (6 tests) 17ms
+
+ Test Files  1 passed (1)
+      Tests  6 passed (6)
+   Start at  08:00:45
+   Duration  276ms (transform 77ms, setup 0ms, collect 91ms, tests 17ms, environment 0ms, prepare 42ms)
+
+npx tsc --noEmit --pretty false
+# exit 0, no output
+```
+
+`npm test` exit was 0. The six tests drive the registry only. They cover the supported-tool list, unsupported names, invalid and unknown fields, settings changes, version conflicts, clip and track edits, undo, redo (including redo cleared by a new edit), checkpoint restore, and undo of that restore.
+
+Headless Chrome against `npm run dev` at `http://127.0.0.1:5173/` (Vite reported ready, HTTP 200):
+
+- Boot showed Version 1, Video 1, and Audio 1.
+- Aspect 9:16, resolution 1080×1920, and frame rate 24 advanced the version to 4.
+- Registering a video reference named City, adding a 4000 ms clip, and moving it to 1500 ms worked.
+- Undo returned the clip to 0 ms. Redo returned it to 1500 ms.
+- Checkpoint "Before delete" stayed on Version 9. Removing the clip and restoring the checkpoint put the clip back. The page then read Version 11 and the status "Restored the checkpoint."
+- Frame rate `23.976` showed a validation error and left the version at 11.
+- The page console had no errors. A 390×844 viewport still showed the timeline.
+- Desktop and mobile screenshots from that pass: `/tmp/editor-verify/desktop.png` and `/tmp/editor-verify/mobile.png`.
 
 ### Outstanding issues
 
-- Phase 1 acceptance criteria in `IMPLEMENTATION_PLAN.md` are unmet.
-- Blocker: `JACKNlFE/Video-Generator` at `15a2dc3a21c9f6809ac65b1d2a3838989241eb58` is not an existing video editor.
+- Project state dies on refresh. There is no database and no file save.
+- No users, sessions, or project-ownership checks.
+- Media has no bytes, so there is no picture, waveform, playback, or export.
+- Media references cannot be deleted or replaced.
+- Aspect ratio does not change width and height, and the reverse is also true.
+- Checkpoints store the document only. They do not store the undo stack.
+- Phases 2–7 are not implemented. Generation, captions, agents, and provider endpoints are absent on purpose.
 
-### Recommended next steps
+### Recommended next step
 
-- Put the real editor in this workspace, or retarget the work to the repository that already contains it.
-- Inventory that editor's actual commands, state store, undo system, and ownership checks.
-- Implement Phase 1 only by wrapping those functions, then run that project's test and typecheck scripts and record the real output here.
+Phase 2, not started: a single server-side editing agent that can inspect a project and call this registry. Confirm the Anthropic model id against current docs and the account before naming one in code.
