@@ -96,6 +96,8 @@ Headless Chrome against `npm run dev` at `http://127.0.0.1:5173/` (Vite reported
 
 ### Outstanding issues
 
+This list is the snapshot at the end of Phase 1. Stage 1, below, adds a job database and leaves the editor document in memory.
+
 - Project state dies on refresh. There is no database and no file save.
 - No users, sessions, or project-ownership checks.
 - Media has no bytes, so there is no picture, waveform, playback, or export.
@@ -104,6 +106,104 @@ Headless Chrome against `npm run dev` at `http://127.0.0.1:5173/` (Vite reported
 - Checkpoints store the document only. They do not store the undo stack.
 - Phases 2–7 are not implemented. Generation, captions, agents, and provider endpoints are absent on purpose.
 
+### Recommendation at the end of Phase 1
+
+The note at the time said Phase 2 should be next. The following work was Stage 1 instead. Phase 2 was not started.
+
+## Stage 1 — Provider and infrastructure foundation
+
+Completed about 5:46 PM CT on Wednesday, November 25, 2026.
+
+The editor files under `src/editor` were not changed. The Vite page still calls `executeTool`. A Node API now loads optional provider credentials, records jobs in SQLite, and enforces budget reservations. No Claude message, Fal generation, or transcription was submitted.
+
+### Completed functionality
+
+- One registry for language models, video, image, transcription, vocal separation, forced alignment, storage, jobs, rendering, and the database seam.
+- Health strings are exactly `not configured`, `configured but unverified`, `connected and verified`, `connection failed`, `insufficient permissions`, and `unavailable model or capability`.
+- Missing optional keys do not throw. `GET /health` does not contact a provider unless `?verify=1` or `PROVIDER_HEALTH_VERIFY=true`.
+- Documented defaults, checked November 25, 2026: creative `claude-fable-5-2`, execution `claude-sonnet-5-5`, review `claude-opus-5-5`, AssemblyAI `assemblyai-stt-3-7` with fallback `universal-2`, OpenAI file transcription `gpt-transcribe`. Fal image and video endpoint ids are unset. A blank env value clears a default. Fallbacks are used only after a live check marks an earlier id unavailable.
+- Verified Claude base rates, the documented 50% batch discount, and the documented cache-read percentages are in `server/providers/documented.ts`. Cache writes, Haiku's "from" price, and Fal, AssemblyAI, OpenAI, R2, Neon, and Trigger prices are unset.
+- Jobs persist in SQLite: create, read, progress, cancel, retry, idempotency, webhook delivery ids, results, and structured errors. `POST /jobs` returns 202 with `runsInsideRequest: false` and status `queued`.
+- Fal webhook verification follows the current JWKS and Ed25519 doc. AssemblyAI uses the documented shared header. The media worker uses the HMAC in `API_SETUP.md`. `dispatchToMediaWorker` is not called by job creation and does not run FFmpeg.
+- Budget reservations are one `BEGIN IMMEDIATE` transaction. A configured limit blocks a second reservation, including two concurrent connections. An unverified price with no explicit estimate is refused.
+
+### Files
+
+Added:
+
+- `.env.example`, `API_SETUP.md`
+- `server/main.ts`, `server/http.ts`, `server/platform.ts`, `server/config.ts`, `server/cost.ts`, `server/dispatch.ts`, `server/money.ts`, `server/webhooks.ts`, `server/persist.mjs`, `server/persist.d.mts`, `server/reserve-worker.mjs`
+- `server/providers/types.ts`, `server/providers/classify.ts`, `server/providers/documented.ts`, `server/providers/live.ts`, `server/providers/mocks.ts`
+- `server/config.test.ts`, `server/providers.test.ts`, `server/jobs.test.ts`, `server/cost.test.ts`, `server/http.test.ts`, `server/boundary.test.ts`
+
+Changed:
+
+- `package.json`, `package-lock.json` (official SDKs and `tsx`)
+- `tsconfig.json`, `vitest.config.ts`, `vite.config.ts` (`envPrefix` is `VITE_PUBLIC_`)
+- `.gitignore`
+- `IMPLEMENTATION_PLAN.md`, `IMPLEMENTATION_PROGRESS.md`
+
+`src/editor`, `src/App.tsx`, `src/main.tsx`, `src/styles.css`, `MASTER_BUILD_BRIEF.md`, and `README.md` were not changed.
+
+### Verification
+
+Commands run in `/agent/repos/Video-Generator` after the Stage 1 code was in place. Final run about 5:46 PM CT. TypeScript `tsc` exited 0 with no output. Vitest 3.2.7 then exited 0.
+
+```text
+npx tsc --noEmit --pretty false
+# exit 0, no output
+
+npm test
+
+> test
+> vitest run
+
+ RUN  v3.2.7 /agent/repos/Video-Generator
+
+ ✓ server/cost.test.ts (5 tests) 79ms
+ ✓ server/http.test.ts (5 tests) 111ms
+ ✓ server/jobs.test.ts (5 tests) 56ms
+ ✓ src/editor/registry.test.ts (6 tests) 16ms
+ ✓ server/providers.test.ts (11 tests) 268ms
+ ✓ server/config.test.ts (5 tests) 5ms
+ ✓ server/boundary.test.ts (2 tests) 1534ms
+
+ Test Files  7 passed (7)
+      Tests  39 passed (39)
+   Start at  23:46:28 UTC
+   Duration  1.73s (transform 236ms, setup 0ms, collect 415ms, tests 2.07s, environment 1ms, prepare 342ms)
+```
+
+The 39 tests include the original 6 editor registry tests. New coverage includes the six health strings, fallback selection, a Fal pricing HTTP 400 versus HTTP 401 with a fake key, official package imports, job reopen and idempotency, Fal signature and duplicate delivery, media-worker HMAC, a second budget reservation, two concurrent reservations, an unverified price refusal, HTTP 202 with `runsInsideRequest: false`, and a Vite production build that does not contain a marker placed in `ANTHROPIC_API_KEY` or `VITE_ANTHROPIC_API_KEY`.
+
+Smoke, same evening, with no provider keys in the environment:
+
+```text
+npm run server
+# api listening on http://127.0.0.1:8787
+# GET /health HTTP 200
+# anthropic, fal, assemblyai, openai, vocal separation, alignment, r2, trigger, neon: not configured
+# local disk, sqlite jobs, renderer seam, sqlite database: connected and verified
+
+npm run dev
+# Vite 6.4.6 ready at http://127.0.0.1:5173/
+# GET / HTTP 200, page contains id="root", and the HTML does not contain ANTHROPIC_API_KEY or FAL_KEY
+```
+
+The timeline was not clicked again. The editor source did not change, and `src/editor/registry.test.ts` passed.
+
+### Outstanding issues
+
+- The editor document still dies on refresh. SQLite stores jobs and budgets, not the timeline.
+- The API has no user login. It binds to `127.0.0.1` unless `HOST` is changed.
+- Fal endpoint ids and Fal prices are unset. The docs' example payload price was not copied.
+- AssemblyAI and OpenAI prices are unset. `gpt-transcribe` word timestamps are not documented, so they are not claimed. Deprecated `whisper-1` is not selected.
+- Claude Haiku 5.5's "from" price and Claude cache-write prices are unset. Default Claude ids are documented ids, not proof the account has them, until `GET /health?verify=1`.
+- Trigger.dev is not the job queue, and its task SDK is not installed. Neon is not the job database.
+- FFmpeg and Python audio are not installed and are not invoked. Node 22 prints an experimental warning for `node:sqlite`.
+- `npm audit` reports moderate `@vitest/mocker`, critical `tinypool`, critical `vitest`, and high `zod`. `npm audit fix --force` was not run. Zod was already the Phase 1 dependency.
+- Phase 2 is not started. No agent, generation, or transcription submission was added.
+
 ### Recommended next step
 
-Phase 2, not started: a single server-side editing agent that can inspect a project and call this registry. Confirm the Anthropic model id against current docs and the account before naming one in code.
+Phase 2, not started: a single server-side editing agent that reads `ANTHROPIC_API_KEY`, checks the configured model with the existing health probe, and calls `executeTool`. Do not import that client from the Vite app.

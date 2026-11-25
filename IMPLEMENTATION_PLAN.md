@@ -1,164 +1,128 @@
 # Implementation plan
 
-The long-term spec is the verbatim copy in `MASTER_BUILD_BRIEF.md` (SHA-256 `5d0a035c65ec7b27fd748fd0c6ae4f50178a6022df0d898488085a3520bd3eb9`). This plan describes the repository after Phase 1. It does not add requirements that are absent from the brief.
+The long-term spec is the verbatim copy in `MASTER_BUILD_BRIEF.md` (SHA-256 `5d0a035c65ec7b27fd748fd0c6ae4f50178a6022df0d898488085a3520bd3eb9`). This plan describes the repository after Stage 1. It does not add requirements that are absent from the brief.
+
+Phase 2 has not been started.
 
 ## Decision
 
 Phase 0 inspected `JACKNlFE/Video-Generator` at `15a2dc3a21c9f6809ac65b1d2a3838989241eb58` and found a README-only repository. There was no editor to wrap.
 
-Mark then chose a greenfield build in this repository. Phase 1 adds a small real editor and a tool registry that calls the same commands as the manual UI. Phases 2–7 are not started. No Anthropic, Fal, AssemblyAI, or OpenAI client is included. Sibling repositories (`Lyric-Video-Creator`, `Clipper-7.16.26`) were not copied.
+Mark then chose a greenfield build in this repository. Phase 1 added a small real editor and a tool registry that calls the same commands as the manual UI. Sibling repositories were not copied.
+
+Stage 1, requested after Phase 1 had merged, adds the server-side provider, job, and budget foundation. It does not change `src/editor`. It does not call Anthropic, Fal, AssemblyAI, or OpenAI during tests, and it does not start the editing agent.
 
 ## Current architecture
 
-The app is a Vite + React page. Authoritative project state lives in an in-memory `EditorStore` in the browser session. There is no HTTP API, database, file upload, renderer, or login.
+The page is still the Vite + React editor. Authoritative editor state is still the in-memory `EditorStore` in the browser session. A separate Node process now holds provider configuration, jobs, and budgets.
 
 | Layer | What exists now |
 | --- | --- |
-| Frontend | `index.html`, `src/main.tsx`, `src/App.tsx`, `src/styles.css`. Vite 6 dev server. |
-| Editing commands | `src/editor/store.ts`. Pure document edits plus undo, redo, and checkpoints. |
-| Tool registry | `src/editor/registry.ts`. Zod 3.25 input and output schemas, then the store functions. |
+| Frontend | `index.html`, `src/main.tsx`, `src/App.tsx`, `src/styles.css`. Vite 6. `envPrefix` is `VITE_PUBLIC_`. The page does not import `server/`. |
+| Editing commands | `src/editor/store.ts`. Unchanged. |
+| Tool registry | `src/editor/registry.ts`. Unchanged. Zod 3.25 input and output schemas. |
 | UI binding | `src/editor/browserEditor.ts`. The page calls `executeTool` only. |
-| Project document | Settings, media references, tracks, clips. Integer version. Millisecond times. UUID ids. |
-| History | Undo and redo stacks of document snapshots. Named checkpoints beside the document. |
-| Database | None. Refreshing the page drops the store. |
-| Media storage | References only: name, kind, duration. No bytes and no object storage. |
-| Auth | None. No user or ownership check exists to enforce. |
-| Rendering | None. The timeline draws clip blocks. It does not play or export pictures. |
-| Deployment | None. `npm run dev` serves the page locally. |
+| Provider registry | `server/platform.ts` and `server/providers/`. Typed providers for language models, video, image, transcription, vocal separation, forced alignment, storage, jobs, rendering, and database. |
+| Live clients | `server/providers/live.ts`. Official SDKs, loaded only when a live check runs. |
+| Mocks | `server/providers/mocks.ts`. Not imported by the live registry. |
+| Jobs | `server/persist.mjs`. SQLite via `node:sqlite`. Create, read, progress, cancel, retry, idempotency, webhook delivery, results, and structured errors. |
+| Budgets | Same SQLite file. Reservations, a usage ledger, and limits. |
+| HTTP | `server/http.ts`. `npm run server` listens on `127.0.0.1:8787` by default. |
+| Editor database | None. Refreshing the page drops the editor store. |
+| Media bytes | Local directory when R2 is incomplete. No bytes are stored by the editor. |
+| Auth | None. |
+| Rendering | The timeline still draws clip blocks. The render provider only queues a job. |
 
-A project document is:
+## Editor behavior that Stage 1 did not change
 
-- `settings.aspectRatio`: `16:9`, `9:16`, `1:1`, `4:5`, or `4:3`
-- `settings.width` and `settings.height`: integers from 16 to 7680
-- `settings.frameRate`: integer from 1 to 240
-- `media[]`: `{ id, name, kind, durationMs }` with kind `video`, `audio`, or `image`
-- `tracks[]`: `{ id, name, kind, index }` with kind `video` or `audio`
-- `clips[]`: `{ id, trackId, mediaId, name, timelineStartMs, sourceInMs, sourceOutMs }`
-
-Playback speed is 1, so a clip's timeline length is `sourceOutMs - sourceInMs`. New projects start at version 1 with tracks named Video 1 and Audio 1.
-
-## How edits and project state work
-
-`executeTool(store, name, input)` is the only mutation API.
-
-1. Unknown tool names return `UNSUPPORTED` and do not touch the store.
-2. Zod parses the input. Failure returns `VALIDATION` and does not touch the store. Objects are strict, so unknown fields fail instead of being ignored.
-3. The store snapshots the session map, runs the command, and checks the output against that tool's Zod schema. A schema failure rolls the snapshot back and returns `INVALID_EDIT`.
-4. Mutating commands require `projectId` and `expectedVersion`. A mismatch returns `VERSION_CONFLICT` with `expectedVersion` and `actualVersion`, and the document stays as it was.
-5. A successful document edit copies the previous document onto the undo stack, clears redo, and increments `version`.
-6. `undo` and `redo` also require the current version, move the opposite stack, and increment `version`. Restoring an old snapshot does not reuse the old version number.
-7. `createCheckpoint` checks the version, stores a clone of the document, and does not increment `version`. `restoreCheckpoint` copies that document back, keeps the same project id, increments `version`, and can itself be undone. Checkpoints do not save the undo stack.
-
-Domain failures use `NOT_FOUND` or `INVALID_EDIT`. They return before the document is replaced.
-
-Clip rules:
-
-- A video track accepts video or image references. An audio track accepts audio only.
-- The source range must sit inside the media duration.
-- Clips on the same track cannot overlap. Touching endpoints is allowed.
-- Trimming the head shifts `timelineStartMs` by the same delta so the tail stays put.
-- Split keeps the left clip id and appends a right clip. The split time must be strictly inside the clip.
-- Removing a track also removes the clips on that track, as one undoable edit.
-
-## Reusable surface
-
-The UI and the tests both call `executeTool`. Store functions are not called from React. Supported names are `listSupportedTools()`:
+`executeTool(store, name, input)` is still the only editor mutation API. The supported names are still `listSupportedTools()`:
 
 `createProject`, `inspectProject`, `inspectTimeline`, `setAspectRatio`, `setResolution`, `setFrameRate`, `registerMedia`, `addTrack`, `removeTrack`, `addClip`, `removeClip`, `moveClip`, `trimClip`, `splitClip`, `undo`, `redo`, `createCheckpoint`, `restoreCheckpoint`.
 
-`registerMedia` is the extra command that makes media references exist. It does not upload a file. `importMedia` is unsupported.
+Unknown names return `UNSUPPORTED`. Zod failures return `VALIDATION` and do not touch the store. Mutations require `expectedVersion`. Undo, redo, and checkpoints behave as they did in Phase 1. `registerMedia` still does not upload a file. `importMedia` is unsupported.
+
+Clip rules are unchanged: track kind must match the media kind, the source range must sit inside the media duration, clips on one track cannot overlap, a head trim keeps the tail put, split keeps the left id, and removing a track removes its clips.
+
+## Provider platform
+
+`createPlatform` builds one registry from `loadConfig(process.env)`. Missing keys do not throw. A blank model variable clears that role's documented default.
+
+Selection is configuration-driven:
+
+- Language roles are `creative`, `execution`, and `review`. The documented defaults are `claude-fable-5-2`, `claude-sonnet-5-5`, and `claude-opus-5-5`, from the Claude models overview checked on November 25, 2026. Fallbacks come only from the `*_FALLBACKS` variables. If a live model list marks an id unavailable, selection uses the next id that was not marked unavailable.
+- Transcription `auto` uses AssemblyAI when its key is set, otherwise OpenAI. If every configured model for the first provider was reported unavailable, selection tries the other configured provider.
+- Fal image and video models stay unset unless `FAL_IMAGE_MODEL` or `FAL_VIDEO_MODEL` is set. No endpoint id is invented.
+- Storage selection is R2 when the four R2 credentials are all set, otherwise local disk.
+- Job selection is SQLite. Trigger.dev can be verified and is not the queue.
+- Database selection is SQLite. Neon can be verified with `SELECT 1` and is not the job store.
+- Rendering selection is the local queue seam. It does not invoke FFmpeg.
+
+Health reports use only: `not configured`, `configured but unverified`, `connected and verified`, `connection failed`, `insufficient permissions`, `unavailable model or capability`.
+
+Verified prices are the Claude base rates, the documented 50% batch discount, and the documented cache-read percentages for Fable 5.2, Opus 5.5, and Sonnet 5.5. Cache writes are not stored. Haiku's "from" price is not stored. Fal, AssemblyAI, OpenAI, R2, Neon, and Trigger prices are not stored. A paid reservation without a verified price and without an explicit positive estimate is refused.
+
+## Jobs and budgets
+
+`POST /jobs` writes a `queued` row and returns 202 with `runsInsideRequest: false`. It does not call a provider and does not call `dispatchToMediaWorker`. Dispatch is a separate function that POSTs to `MEDIA_WORKER_URL` only when that URL and `MEDIA_WORKER_SECRET` are both set.
+
+Statuses are `pending`, `queued`, `processing`, `awaiting_approval`, `completed`, `failed`, and `cancelled`. Cancel and retry are stored transitions. Webhook deliveries are unique on provider plus delivery id. A cancelled job does not become completed when a later webhook arrives.
+
+Fal signatures follow the current Fal webhook doc (JWKS, Ed25519, ±300 seconds). AssemblyAI uses the documented shared header, not an HMAC. The media worker uses an HMAC defined in `API_SETUP.md`.
+
+Budget checks run inside `BEGIN IMMEDIATE`. A second reservation that would pass a configured UTC daily, monthly, project, or run limit inserts nothing. Unset limits are not enforced.
 
 ## Missing functionality relative to the brief
 
-| Brief section | Status | What Phase 1 actually has |
+| Brief section | Status | What the repo actually has |
 | --- | --- | --- |
-| 1. Manual editor plus autonomous AI production | Partial | Manual edits of the Phase 1 timeline exist. No autonomous production. |
-| 2. Preserve an existing editor | Partial | The checkout had no editor. This phase added one instead of importing another repo. |
-| 3. Modular production architecture | Partial | Typed editor commands exist. The other modules do not. |
-| 4. Model routing and agents | Missing | No model client and no agent loop. |
-| 5. Tool registry | Partial | The tools listed above are real. Generation, captions, effects, transitions, and export are unsupported and fail. |
-| 6. Production plans | Missing | |
-| 7. Generative video | Missing | No Fal client and no invented endpoints. |
-| 8. Generative image | Missing | |
-| 9. Captions and transcription | Missing | |
-| 10. Audio analysis | Missing | |
-| 11. Media intelligence | Missing | |
-| 12. Timeline, versions, undo | Partial | Multiple video and audio tracks, clip edits, monotonic versions, undo, redo, checkpoints. No effects, transitions, keyframes, lock, mute, or server concurrency. |
-| 13. AI assistant and caption panel | Missing | The page is the manual editor only. |
-| 14. Database and object storage | Missing | In-memory store only. No migration. |
-| 15. Background jobs | Missing | |
-| 16. Budgets | Missing | |
-| 17. Credentials and auth | Missing | No secrets are required. No user model. |
+| 1. Manual editor plus autonomous AI production | Partial | Manual Phase 1 timeline. No autonomous production. |
+| 3. Modular production architecture | Partial | Typed provider interfaces and a registry. No agent and no generation call. |
+| 4. Model routing and agents | Partial | Configurable model ids, fallbacks, and a health check. No agent loop and no Messages call. |
+| 5. Tool registry | Partial | Phase 1 editing tools only. Generation, captions, effects, and export still return `UNSUPPORTED`. |
+| 7–11. Generation, captions, audio analysis, media intelligence | Missing | Interfaces and env only. No submission and no FFmpeg. |
+| 12. Timeline, versions, undo | Partial | Unchanged Phase 1 editor. |
+| 14. Database and object storage | Partial | SQLite for jobs and budgets. Optional Neon and R2 clients. Editor state is still memory. |
+| 15. Background jobs | Partial | Persistent local jobs, webhooks, and a worker seam. Trigger.dev is not the queue. No media is processed. |
+| 16. Budgets | Partial | Ledger, verified Claude rates, and enforced limits. Other provider prices are unset. No user approval flow. |
+| 17. Credentials | Partial | Server env, `.env.example`, and a Vite boundary. No user login. |
 | 18. Preview and export | Missing | |
-| 19. Tests | Partial | Registry unit tests cover edits, validation, conflicts, undo, and checkpoints. No provider or end-to-end harness is in the repo. |
-| 20. Phases | Partial | Phase 0 and Phase 1 are done. Phases 2–7 are not started. |
+| 19. Tests | Partial | Editor registry tests plus provider, job, budget, HTTP, and bundle tests. |
+| 20. Phases | Partial | Phase 0, Phase 1, and Stage 1 are done. Phase 2 is not started. |
 | 21. Full acceptance workflow | Missing | |
-| 22. Operational docs | Partial | This plan and `IMPLEMENTATION_PROGRESS.md`. No provider or deployment guide, because those integrations are not enabled. |
-
-## Limits that matter for a later agent
-
-- The store is the page session. A reload starts a new project.
-- There is no authorization layer. Tools that know a project id can edit it.
-- A tool cannot see pixels, audio samples, or a rendered frame.
-- Aspect ratio and pixel size are separate fields. Changing one does not rewrite the other.
-- Frame rate must be an integer. `23.976` fails validation.
-- Times are capped at 24 hours (`86_400_000` ms).
 
 ## Material decisions
 
-1. Greenfield in this repo, after the empty checkout. The brief still assumes an existing product; the plan records that conflict instead of rewriting `MASTER_BUILD_BRIEF.md`.
-2. One in-memory document, not a second timeline beside a database that does not exist.
-3. Zod 3 (`zod` 3.25.76) for every tool input and output. The package stays on 3.x.
-4. `registerMedia` is part of the foundation because a clip has to point at a media id. File import, generation, captions, and export are refused.
-5. Version numbers only increase, including on undo, redo, and checkpoint restore, so a stale caller cannot apply an edit to the wrong document.
-6. No auth was invented. Adding a fake user would report a control that does not exist.
-7. No provider SDK, endpoint, model id, or price was added.
+1. Greenfield editor in this repo, recorded in Phase 1. `MASTER_BUILD_BRIEF.md` was not rewritten.
+2. Stage 1 does not import or change `src/editor`.
+3. Jobs and budgets use `node:sqlite` so the process runs without Neon. Node 22 prints an experimental warning for that module.
+4. Official SDKs are used for Anthropic, OpenAI, AssemblyAI, the Fal client configuration, the AWS S3 client for R2, and the Neon serverless driver. Fal's pricing check and Trigger's key check use the documented HTTP routes. `@trigger.dev/sdk` is not installed because no task is defined.
+5. Documented Claude, AssemblyAI, and OpenAI model ids are defaults and can be cleared or replaced with env. Fal endpoint ids have no default.
+6. Unset budget limits do not block startup and do not invent a cap. A configured cap is enforced in SQLite.
+7. The local API has no user authentication and binds to `127.0.0.1` unless `HOST` is changed.
 
 ## Phases
 
 ### Phase 0 — Repository audit
 
-Acceptance: the three markdown files exist, the brief copy matches the source byte-for-byte, and the plan matches the tree that was inspected.
-
-Status: met before the greenfield code. The brief file is still the verbatim copy.
+Met before the editor code. The brief file is still the verbatim copy.
 
 ### Phase 1 — Programmatic editing foundation
 
-Acceptance:
+Met. See `IMPLEMENTATION_PROGRESS.md`. Stage 1 did not change those files' behavior.
 
-- The registry exposes the editing operations the manual page can perform, and the page calls that registry.
-- Each supported tool has a Zod input schema and a Zod output schema.
-- Invalid input and unknown tool names return a structured error and leave the document unchanged.
-- Unsupported operations are not reported as success.
-- Mutations check `expectedVersion`.
-- Undo, redo, create checkpoint, and restore checkpoint work, and tests cover them without a model.
-- The page can create a project, change settings, register media, add and remove tracks, and add, move, trim, split, and remove clips.
+### Stage 1 — Provider and infrastructure foundation
 
-Status: met. See `IMPLEMENTATION_PROGRESS.md` for the commands that were run.
+Met. Server config, provider registry, live clients, mocks, SQLite jobs, webhooks, budgets, `API_SETUP.md`, and the tests recorded in `IMPLEMENTATION_PROGRESS.md`.
+
+This is not Phase 2. No editing agent was added.
 
 ### Phase 2 — Single-agent autonomous editing
 
-Not started. Next work, when requested: call a configured Anthropic model through a server-side key, inspect a project with the existing tools, and run a tool loop that uses `executeTool`. Model ids have to be checked against current docs and the account before they are written down. No client is added in this phase.
+Not started. Next work, when requested: call a configured Anthropic model through the server key, inspect a project with the existing tools, and run a tool loop that uses `executeTool`. Do not call the model from the Vite bundle. Account availability still has to be checked with `GET /health?verify=1` before treating a default id as usable.
 
-### Phase 3 — Automatic captions and audio intelligence
+### Phases 3–7
 
-Not started. Outline from brief section 20: AssemblyAI, word times, editable captions, styling, subtitle export, lyric mode, optional vocal isolation and alignment, beat detection, then tools for those operations. Provider model ids stay unverified until that phase.
-
-### Phase 4 — Generative media
-
-Not started. Outline: Fal video and image generation, a capability registry filled from provider docs, async jobs, and stored assets placed with the existing clip commands. No endpoints are chosen here.
-
-### Phase 5 — Multi-agent orchestration
-
-Not started. Outline: creative plan, execution, review, and Fast / Advanced / Maximum routing. Brief section 4.4 says to keep a single agent until the tools are in use.
-
-### Phase 6 — Automated review and optimization
-
-Not started. Outline: sampled frames, deterministic checks, bounded revisions, and measured routing. No claim is made that a model watched a video.
-
-### Phase 7 — Production hardening
-
-Not started. Outline: auth, jobs, budgets, deployment, and the section 21 workflow.
+Not started. Captions, generative media, multi-agent routing, review, and production hardening remain future work. Stage 1 only prepared their interfaces.
 
 ## Run locally
 
@@ -167,6 +131,7 @@ npm install
 npm test
 npm run typecheck
 npm run dev
+npm run server
 ```
 
-`npm run dev` serves the editor at `http://127.0.0.1:5173/`.
+`npm run dev` serves the editor at `http://127.0.0.1:5173/`. `npm run server` serves the API at `http://127.0.0.1:8787/`. Setup for each provider is `API_SETUP.md`.
