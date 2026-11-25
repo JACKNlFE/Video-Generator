@@ -2,7 +2,7 @@
 
 The long-term spec is the verbatim copy in `MASTER_BUILD_BRIEF.md` (SHA-256 `5d0a035c65ec7b27fd748fd0c6ae4f50178a6022df0d898488085a3520bd3eb9`). This plan describes the repository after Stage 1. It does not add requirements that are absent from the brief.
 
-Phase 2 has not been started.
+Step A, on the branch stacked on Stage 1, adds real editor tools for captions, effects, subtitles, ffmpeg analysis, and a mock assistant. Paid providers were not called. Phase 2's live Claude loop was not executed.
 
 ## Decision
 

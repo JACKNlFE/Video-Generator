@@ -24,29 +24,55 @@ describe("editing tool registry", () => {
     expect([...listSupportedTools()].sort()).toEqual([
       "addClip",
       "addTrack",
+      "addCaptionSegment",
+      "addCaptionTrack",
+      "addKeyframe",
+      "addTextOverlay",
+      "alignLyrics",
+      "applyEffect",
+      "attachTranscript",
+      "completeRender",
       "createCheckpoint",
       "createProject",
+      "editCaptionText",
+      "exportSubtitles",
+      "exportVideo",
+      "generateCaptions",
+      "importMedia",
       "inspectProject",
       "inspectTimeline",
       "moveClip",
+      "previewVideo",
       "redo",
       "registerMedia",
       "removeClip",
+      "removeEffect",
       "removeTrack",
       "restoreCheckpoint",
+      "separateVocals",
       "setAspectRatio",
+      "setCaptionStyle",
+      "setClipSpeed",
+      "setColor",
+      "setFades",
       "setFrameRate",
+      "setOpacity",
       "setResolution",
+      "setTransform",
+      "setTransition",
+      "setVolume",
       "splitClip",
+      "storeAudioAnalysis",
+      "syncCutsToBeats",
       "trimClip",
       "undo",
-    ]);
+    ].sort());
   });
 
   it("rejects unsupported operations without changing the project", () => {
     const editor = createEditor();
     const created = ok<ProjectView>(executeTool(editor, "createProject", { name: "Spot" }));
-    for (const name of ["generateVideo", "generateCaptions", "applyEffect", "exportVideo", "transcribeAudio", "importMedia"]) {
+    for (const name of ["generateVideo", "transcribeAudio"]) {
       const result = fail(executeTool(editor, name, { projectId: created.project.id }));
       expect(result.error.code).toBe("UNSUPPORTED");
       expect(result.error.message).toContain(name);

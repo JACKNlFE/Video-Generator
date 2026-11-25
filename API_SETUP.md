@@ -251,6 +251,20 @@ This repository does not yet have a hosting project, a Dockerfile, or a deploy w
 - Preview and production differ by which keys, budgets, `TRIGGER_API_URL`, and database URL you inject. Neon and Trigger stay optional. R2, when configured, replaces local disk as the selected storage provider.
 - Rotate a leaked key at the provider. The SQLite file and logs must not contain it. Health details redact connection URLs.
 
+## Editor, captions, and audio
+
+The page uses `/api` when the API process is up (Vite proxies `/api` to port 8787). Assistant turns without `ANTHROPIC_API_KEY` use the mock planner and return `liveVerified: false`. They do not write spoken words.
+
+Transcription jobs do not invent a transcript when AssemblyAI and OpenAI keys are absent. They fail with the provider not configured. Tests pass a fixture transcript into `attachTranscript`. `generateCaptions` only copies words already stored. `editCaptionText` rejects wording changes on those captions.
+
+`alignLyrics` places the user's exact tokens on cached onset times, or spreads them evenly if there are too few onsets. Every aligned word is `uncertain: true`. This is not a benchmarked sung-vocal aligner.
+
+Audio analysis uses ffmpeg (`ffmpeg-energy-v1`): PCM energy for onsets, `silencedetect`, and `volumedetect`. Librosa is not installed. BPM is omitted when there are fewer than four usable gaps. `syncCutsToBeats` reads the cached beat list.
+
+Preview and export rendering use ffmpeg (`libx264`, optional `subtitles` burn-in, AAC). `POST /jobs` still only records the job. A separate call runs the ffmpeg work. Demucs is not installed. `separateVocals` returns an error and does not replace the original audio.
+
+Uploads accepted by extension are mp3, wav, m4a, aac, flac, mp4, mov, and webm, up to 100 MB. Duration comes from ffprobe.
+
 ## Not in this stage
 
-No Claude agent, no Fal generation, no AssemblyAI or OpenAI transcription submission, no vocal separation, no forced alignment, no FFmpeg transcode, and no Trigger.dev task runs. The editor document is still the in-memory browser store from Phase 1.
+No Fal generation and no Trigger.dev task runs. Claude, AssemblyAI, and OpenAI were not called in this environment because their keys are unset.

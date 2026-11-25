@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { z } from "zod";
+import { anthropicPlanner, runAgentTurn } from "./agent/loop";
 import { limitsFrom, reserveForOperation } from "./cost";
 import { usdToMicros } from "./money";
 import type { Platform } from "./platform";
@@ -14,6 +15,7 @@ import {
   retryJob,
   updateProgress,
 } from "./persist.mjs";
+import { editorFor, handleStudio, saveEditor } from "./studio";
 import { loadFalJwks, verifyFalSignature, verifyMediaWorkerSignature, verifySharedSecret, type FalJwk } from "./webhooks";
 
 const JOB_KINDS = ["video.generate", "image.generate", "audio.transcribe", "audio.separate", "audio.align", "media.render", "media.probe"] as const;
@@ -77,6 +79,47 @@ export function startServer(platform: Platform, options: { port?: number; fetchI
 async function route(platform: Platform, request: IncomingMessage, response: ServerResponse, deps: { fetchImpl: typeof fetch; now: () => Date; jwksCache: { keys: FalJwk[] | null; fetchedAt: number } }) {
   const url = new URL(request.url ?? "/", "http://127.0.0.1");
   const method = request.method ?? "GET";
+  if (url.pathname.startsWith("/editor") || url.pathname === "/media/upload" || url.pathname === "/agent/turns") {
+    const body = await readBody(request, url.pathname === "/media/upload" ? 100_000_000 : 1_000_000);
+    if (url.pathname === "/agent/turns" && platform.config.anthropicApiKey) {
+      const payload = JSON.parse(body.toString("utf8")) as { projectId?: string; text?: string };
+      const store = editorFor(platform.db);
+      const model = await anthropicPlanner(platform.config.anthropicApiKey, platform.config.llm.execution[0] ?? "claude-sonnet-5-5");
+      const turn = await runAgentTurn({
+        model,
+        store,
+        projectId: payload.projectId ?? "",
+        userText: payload.text ?? "",
+        maxIterations: 4,
+        beforeIteration: () => {
+          const reserved = reserveForOperation(platform.db, {
+            providerId: "anthropic",
+            modelId: platform.config.llm.execution[0] ?? null,
+            operation: "input_tokens",
+            quantity: 1000,
+            limits: limitsFrom(platform.config),
+            now: deps.now().toISOString(),
+            projectId: payload.projectId,
+          });
+          return reserved.ok ? { ok: true } : { ok: false, reason: "budget" };
+        },
+      });
+      saveEditor(platform.db, store);
+      send(response, 200, turn);
+      return;
+    }
+    const handled = await handleStudio({
+      db: platform.db,
+      config: platform.config,
+      method,
+      pathname: url.pathname,
+      body,
+      request,
+      response,
+      send,
+    });
+    if (handled) return;
+  }
   if (method === "GET" && url.pathname === "/health") {
     const verify = url.searchParams.get("verify") === "1" || platform.config.providerHealthVerify;
     const reports = await platform.health(verify);
@@ -306,13 +349,13 @@ async function readJson(request: IncomingMessage): Promise<unknown> {
   return JSON.parse(body.toString("utf8"));
 }
 
-function readBody(request: IncomingMessage): Promise<Buffer> {
+function readBody(request: IncomingMessage, limit = 1_000_000): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     let size = 0;
     request.on("data", (chunk: Buffer) => {
       size += chunk.length;
-      if (size > 1_000_000) {
+      if (size > limit) {
         reject(Object.assign(new Error("body too large"), { code: "body_too_large" }));
         request.destroy();
         return;
