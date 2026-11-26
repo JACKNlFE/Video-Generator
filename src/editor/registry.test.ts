@@ -38,6 +38,8 @@ describe("editing tool registry", () => {
       "exportSubtitles",
       "exportVideo",
       "generateCaptions",
+      "generateImage",
+      "generateVideo",
       "importMedia",
       "inspectProject",
       "inspectTimeline",
@@ -72,7 +74,7 @@ describe("editing tool registry", () => {
   it("rejects unsupported operations without changing the project", () => {
     const editor = createEditor();
     const created = ok<ProjectView>(executeTool(editor, "createProject", { name: "Spot" }));
-    for (const name of ["generateVideo", "transcribeAudio"]) {
+    for (const name of ["transcribeAudio"]) {
       const result = fail(executeTool(editor, name, { projectId: created.project.id }));
       expect(result.error.code).toBe("UNSUPPORTED");
       expect(result.error.message).toContain(name);

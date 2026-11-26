@@ -12,6 +12,7 @@ import {
   exportSubtitles,
   generateCaptions,
   importMedia,
+  queueGeneration,
   queueRender,
   removeEffect,
   separateVocals,
@@ -59,6 +60,8 @@ import {
   syncCutsInput,
   syncCutsOutput,
   textRangeInput,
+  generationOutput,
+  queueGenerationInput,
   trackOutput,
   transcriptOutput,
 } from "./productionInputs";
@@ -177,6 +180,8 @@ const tools: Record<SupportedTool, ToolDefinition> = {
   exportVideo: defineTool(queueRenderInput, renderOutput, (store, input) => queueRender(store, { ...input, kind: "export" })),
   completeRender: defineTool(completeRenderInput, mutationSchema, (store, input) => completeRender(store, input)),
   separateVocals: defineTool(versionedInput, mutationSchema, () => separateVocals()),
+  generateVideo: defineTool(queueGenerationInput, generationOutput, (store, input) => queueGeneration(store, { ...input, kind: "video" })),
+  generateImage: defineTool(queueGenerationInput, generationOutput, (store, input) => queueGeneration(store, { ...input, kind: "image" })),
 };
 
 export function createEditor(): EditorStore {
