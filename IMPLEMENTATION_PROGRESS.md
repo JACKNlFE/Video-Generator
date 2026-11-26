@@ -257,3 +257,64 @@ No paid provider was called. The requirement trace is in `KNOWN_LIMITATIONS.md`.
 ### Recommended next step
 
 Add real keys on a private machine and run `GET /health?verify=1` before trusting a provider row. Do not treat a queued Fal row as finished media.
+
+## Railway — one service
+
+Recorded about 12:42 PM CT on Thursday, November 26, 2026. No provider key was set. Nothing was deployed to Railway. This environment has no `docker` command, so the image was not built here. The Dockerfile text is what `server/deploy.test.ts` checks.
+
+### What changed
+
+One process serves `dist/` and the API. `/api/...` is the same routes as the unprefixed API, which is what the built editor calls. `npm run dev` is still Vite on `127.0.0.1:5173`. `npm run server` with no `PORT` and no `HOST` still listens on `127.0.0.1:8787`.
+
+When `PORT` is set and `HOST` is empty, the process binds `0.0.0.0`. When Railway's environment variables and `PORT` are both present, it binds `0.0.0.0` even if `HOST` is `127.0.0.1`.
+
+`JOBS_DB_PATH` and `MEDIA_ROOT` stay configurable. If they are unset and `RAILWAY_VOLUME_MOUNT_PATH` is set, they default onto that volume (`/data/platform.sqlite` and `/data/media` when the mount is `/data`). The Dockerfile does not copy `data/`, `.env`, or sqlite files. `railway.toml` names one Dockerfile service, the start command `npm run server`, and the health check `/health`. Railway's docs say a new service stops reading `railway.toml` on December 1, 2026. The image command is the same `npm run server`.
+
+The app is not production-ready. Live providers were not called.
+
+### Verification
+
+Commands run in `/agent/repos/Video-Generator`. `npm test` exited 0. `npm run typecheck` and `npm run lint` are `tsc --noEmit` and both exited 0.
+
+```text
+npm test
+
+> test
+> vitest run
+
+ RUN  v3.2.7 /agent/repos/Video-Generator
+
+ Test Files  13 passed (13)
+      Tests  54 passed (54)
+   Start at  18:41:59 UTC
+   Duration  1.98s
+
+npm run typecheck
+# tsc --noEmit
+# exit 0
+
+npm run lint
+# tsc --noEmit
+# exit 0
+```
+
+Smoke, same minute, with no provider keys:
+
+```text
+JOBS_DB_PATH and MEDIA_ROOT pointed at /tmp, no HOST, no PORT
+# api listening on http://127.0.0.1:8787
+# editor files from /agent/repos/Video-Generator/dist
+# GET /health HTTP 200, body ok true
+# GET /api/health HTTP 200
+# GET / HTTP 200, content-type text/html, page contains id="root"
+
+PORT=8791 HOST=127.0.0.1 RAILWAY_ENVIRONMENT=production
+# api listening on http://0.0.0.0:8791
+# GET http://127.0.0.1:8791/health HTTP 200
+
+npm run dev
+# Vite 6.4.6 ready at http://127.0.0.1:5173/
+# GET / HTTP 200
+```
+
+The 54 tests include the earlier editor, job, budget, and provider cases. New cases cover loopback versus Railway bind, volume paths, `/api` on the same origin as the editor files, a path that tries to leave the editor directory, and the Dockerfile start command. The ffmpeg preview test still passed. No paid provider was called.

@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { loadConfig, missingR2Names, r2Endpoint } from "./config";
+import { loadConfig, missingR2Names, r2Endpoint, startupWarnings } from "./config";
 import { ANTHROPIC_DEFAULTS, ASSEMBLYAI_DEFAULTS, OPENAI_TRANSCRIPTION_DEFAULT } from "./providers/documented";
 
 describe("server config", () => {
@@ -48,6 +48,7 @@ describe("server config", () => {
     const example = readFileSync(new URL("../.env.example", import.meta.url), "utf8");
     const names = new Set<string>();
     for (const match of source.matchAll(/(?:optional|usd|flag)\(env, "([A-Z0-9_]+)"\)/g)) names.add(match[1] ?? "");
+    for (const match of source.matchAll(/persistedPath\(env, "([A-Z0-9_]+)"/g)) names.add(match[1] ?? "");
     for (const match of source.matchAll(/chain\(env, "([A-Z0-9_]+)", "([A-Z0-9_]+)"/g)) {
       names.add(match[1] ?? "");
       names.add(match[2] ?? "");
@@ -55,5 +56,35 @@ describe("server config", () => {
     expect(names.size).toBeGreaterThan(20);
     for (const name of names) expect(example).toContain(name);
     expect(example).not.toMatch(/sk-ant-|sk-proj-|tr_prod_sk_/);
+  });
+
+  it("keeps a local server on loopback and a Railway PORT on every interface", () => {
+    expect(loadConfig({}).host).toBe("127.0.0.1");
+    expect(loadConfig({}).port).toBe(8787);
+    expect(loadConfig({ HOST: "127.0.0.1", PORT: "8787" }).host).toBe("127.0.0.1");
+    expect(loadConfig({ PORT: "8080" }).host).toBe("0.0.0.0");
+    expect(loadConfig({ PORT: "8080", HOST: "127.0.0.1", RAILWAY_ENVIRONMENT: "production" }).host).toBe("0.0.0.0");
+    expect(loadConfig({ HOST: "127.0.0.1", RAILWAY_ENVIRONMENT: "production" }).host).toBe("127.0.0.1");
+  });
+
+  it("puts unset job and media paths on a Railway volume", () => {
+    expect(loadConfig({}).jobsDbPath).toBe("data/platform.sqlite");
+    expect(loadConfig({}).mediaRoot).toBe("data/media");
+    const mounted = loadConfig({ RAILWAY_VOLUME_MOUNT_PATH: "/data/" });
+    expect(mounted.jobsDbPath).toBe("/data/platform.sqlite");
+    expect(mounted.mediaRoot).toBe("/data/media");
+    const explicit = loadConfig({ RAILWAY_VOLUME_MOUNT_PATH: "/data", JOBS_DB_PATH: "/data/custom.sqlite", MEDIA_ROOT: "/data/uploads" });
+    expect(explicit.jobsDbPath).toBe("/data/custom.sqlite");
+    expect(explicit.mediaRoot).toBe("/data/uploads");
+    expect(startupWarnings({})).toEqual([]);
+    expect(startupWarnings({ RAILWAY_ENVIRONMENT: "production", PORT: "8080" })[0]).toMatch(/volume/i);
+    expect(startupWarnings({ RAILWAY_ENVIRONMENT: "production", PORT: "8080", RAILWAY_VOLUME_MOUNT_PATH: "/data" })).toEqual([]);
+    expect(startupWarnings({
+      RAILWAY_ENVIRONMENT: "production",
+      PORT: "8080",
+      RAILWAY_VOLUME_MOUNT_PATH: "/data",
+      JOBS_DB_PATH: "data/platform.sqlite",
+      MEDIA_ROOT: "data/media",
+    }).join("\n")).toMatch(/JOBS_DB_PATH/);
   });
 });

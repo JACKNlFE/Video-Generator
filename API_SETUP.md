@@ -240,14 +240,15 @@ Job kinds accepted by the API are `video.generate`, `image.generate`, `audio.tra
 
 ## Preview and production
 
-This repository does not yet have a hosting project, a Dockerfile, or a deploy workflow. Use the same Node API and the Vite build in each environment, with different env values.
+Railway runs one service from the root `Dockerfile`. The same process serves `dist/` and the API. The click path, volume paths, and variable names are in `DEPLOYMENT_GUIDE.md`. That deploy does not make the app production-ready, and live providers were not verified.
 
-- Build the editor with `npm run build`. Publish the `dist/` directory as static files. Do not put provider keys in that build.
-- Run `npm run server` (`tsx server/main.ts`) as its own process. Give it a persistent disk for the SQLite file. Ephemeral serverless disks will forget jobs.
+- Do not put provider keys in the Vite build or in git. Enter them in Railway's Variables tab.
+- The start command is `npm run server` (`tsx server/main.ts`). On your computer, with no `PORT`, it stays on `127.0.0.1:8787`.
+- Put `JOBS_DB_PATH` and `MEDIA_ROOT` on a Railway volume, for example `/data`. The image does not contain the database or uploads.
 - Do not put long media work inside a short HTTP function. The job route only records the job. A worker with FFmpeg or Python should consume `POST /jobs` on the media-worker URL later.
-- Set `WEBHOOK_BASE_URL` to the public API origin so `GET /providers` prints the webhook URLs to register at Fal and AssemblyAI.
-- Set the budget variables in production before any paid provider is called.
-- Keep `HOST` at `127.0.0.1` unless the process sits behind an edge you control. There is no user authentication in this stage.
+- Set `WEBHOOK_BASE_URL` to the public origin, with no path, so `GET /providers` prints the webhook URLs to register at Fal and AssemblyAI.
+- Set the budget variables before any paid provider is called.
+- On Railway, leave `HOST` and `PORT` empty. Railway sets `PORT`, and the process binds `0.0.0.0`. There is no user login in this stage. `APP_AUTH_TOKEN` locks changes, and the editor page does not send that token.
 - Preview and production differ by which keys, budgets, `TRIGGER_API_URL`, and database URL you inject. Neon and Trigger stay optional. R2, when configured, replaces local disk as the selected storage provider.
 - Rotate a leaked key at the provider. The SQLite file and logs must not contain it. Health details redact connection URLs.
 
