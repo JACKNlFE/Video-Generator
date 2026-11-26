@@ -40,6 +40,8 @@ export type AppConfig = {
   providerHealthVerify: boolean;
   port: number;
   host: string;
+  appAuthToken: string | null;
+  mediaSigningSecret: string | null;
 };
 
 export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
@@ -96,6 +98,8 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
     providerHealthVerify: flag(env, "PROVIDER_HEALTH_VERIFY"),
     port: port(env),
     host: optional(env, "HOST") ?? "127.0.0.1",
+    appAuthToken: optional(env, "APP_AUTH_TOKEN"),
+    mediaSigningSecret: optional(env, "MEDIA_SIGNING_SECRET"),
   };
 }
 

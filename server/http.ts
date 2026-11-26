@@ -15,6 +15,7 @@ import {
   retryJob,
   updateProgress,
 } from "./persist.mjs";
+import { allowRequest, authorized } from "./security";
 import { editorFor, handleStudio, saveEditor } from "./studio";
 import { loadFalJwks, verifyFalSignature, verifyMediaWorkerSignature, verifySharedSecret, type FalJwk } from "./webhooks";
 
@@ -79,6 +80,14 @@ export function startServer(platform: Platform, options: { port?: number; fetchI
 async function route(platform: Platform, request: IncomingMessage, response: ServerResponse, deps: { fetchImpl: typeof fetch; now: () => Date; jwksCache: { keys: FalJwk[] | null; fetchedAt: number } }) {
   const url = new URL(request.url ?? "/", "http://127.0.0.1");
   const method = request.method ?? "GET";
+  if (!allowRequest(request.socket.remoteAddress ?? "local", deps.now().getTime())) {
+    send(response, 429, { error: { code: "rate_limited", message: "Too many requests." } });
+    return;
+  }
+  if (!authorized(platform.config.appAuthToken, request.headers.authorization, method)) {
+    send(response, 401, { error: { code: "unauthorized", message: "This action needs the owner token." } });
+    return;
+  }
   if (url.pathname.startsWith("/editor") || url.pathname === "/media/upload" || url.pathname === "/agent/turns") {
     const body = await readBody(request, url.pathname === "/media/upload" ? 100_000_000 : 1_000_000);
     if (url.pathname === "/agent/turns") {

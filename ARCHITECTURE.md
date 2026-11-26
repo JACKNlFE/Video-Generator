@@ -2,7 +2,7 @@
 
 The browser editor and the API share one project document shape, defined in `src/editor/schema.ts`. Phase 1 commands still go through `executeTool`. Newer caption, effect, transform, subtitle, analysis, and render commands use that same function and the same undo stack.
 
-When `npm run server` is running, Vite proxies `/api` to `127.0.0.1:8787` and the page creates its project there. If the API is down, the page keeps a tab-local copy and says so. There is no second timeline format.
+When `npm run server` is running, Vite proxies `/api` to `127.0.0.1:8787` and the page creates its project there. If the API is down, the page keeps a tab-local copy and says so. There is no second timeline format. If `APP_AUTH_TOKEN` is set, changes require that bearer token. GET health stays open. Media file names can be signed with `MEDIA_SIGNING_SECRET`; unsigned download is not turned on.
 
 ## Processes
 

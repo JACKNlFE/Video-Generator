@@ -240,6 +240,20 @@ Recorded about 6:01 PM CT on Wednesday, November 25, 2026. `npm test` exited 0 w
 
 Verified endpoint ids, with prices left null: `fal-ai/veo3.1`, Kling v3 Pro text-to-video and image-to-video, `fal-ai/ltx-2.3/audio-to-video`, `alibaba/wan-3.0-prime/reference-to-video`, `bytedance/seedance-2.5/text-to-video`, `fal-ai/flux/schnell`, and `fal-ai/flux-pro/v1.1`. Runway is omitted. Music requests do not select a video model. Budget mode does not select text-to-video. `generateImage` / `generateVideo` only queue `liveVerified: false`. Fast, advanced, and maximum routes pick the configured Claude ids and do not call them. Quality checks look at the timeline only.
 
+### Recommendation at the end of Step B
+
+Step C adds owner docs and local guards. It does not make the app production-ready.
+
+## Step C — Owner setup and honest limits
+
+Recorded about 6:02 PM CT on Wednesday, November 25, 2026.
+
+`npx tsc --noEmit --pretty false` exited 0. `npm run lint` is that same check and exited 0. `npm test` exited 0: 12 files, 49 tests. `npm run build` exited 0 with Vite 6.4.6 before a server-only signature fix; tests were re-run after the fix.
+
+Added optional `APP_AUTH_TOKEN` for changes, a per-address rate limit, and `MEDIA_SIGNING_SECRET` for timed file names. The provider check on the page reads `/api/health`. Guides: `DEPLOYMENT_GUIDE.md`, `TEST_REPORT.md`, `KNOWN_LIMITATIONS.md`, and `FINAL_SETUP_CHECKLIST.md`.
+
+No paid provider was called. The requirement trace is in `KNOWN_LIMITATIONS.md`. The app is not production-ready. The assistant remains SDK-backed and unverified live.
+
 ### Recommended next step
 
-Step C: owner-facing setup docs, the remaining panels, and an honest requirement trace. Do not call the app production-ready.
+Add real keys on a private machine and run `GET /health?verify=1` before trusting a provider row. Do not treat a queued Fal row as finished media.
