@@ -3,7 +3,6 @@ import { join } from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { executeTool, createEditor } from "../src/editor/registry";
 import type { EditorStore } from "../src/editor/store";
-import { mockPlanner, runAgentTurn } from "./agent/loop";
 import type { AppConfig } from "./config";
 import { extensionOf, MEDIA_EXTENSIONS, probeDurationMs } from "./media/ffmpeg";
 import type { PersistDatabase } from "./persist.d.mts";
@@ -74,24 +73,6 @@ export async function handleStudio(input: {
     writeFileSync(fullPath, input.body);
     const durationMs = await probeDurationMs(fullPath);
     input.send(input.response, 201, { fileName: storedName, durationMs, liveVerified: false });
-    return true;
-  }
-  if (input.method === "POST" && input.pathname === "/agent/turns") {
-    const payload = JSON.parse(input.body.toString("utf8")) as { projectId?: string; text?: string; maxIterations?: number };
-    if (!payload.projectId || !payload.text) {
-      input.send(input.response, 400, { error: { code: "validation", message: "projectId and text are required." } });
-      return true;
-    }
-    const store = editorFor(input.db);
-    const turn = await runAgentTurn({
-      model: mockPlanner(),
-      store,
-      projectId: payload.projectId,
-      userText: payload.text,
-      maxIterations: Math.min(payload.maxIterations ?? 4, 8),
-    });
-    saveEditor(input.db, store);
-    input.send(input.response, 200, turn);
     return true;
   }
   return false;

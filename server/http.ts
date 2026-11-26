@@ -81,10 +81,15 @@ async function route(platform: Platform, request: IncomingMessage, response: Ser
   const method = request.method ?? "GET";
   if (url.pathname.startsWith("/editor") || url.pathname === "/media/upload" || url.pathname === "/agent/turns") {
     const body = await readBody(request, url.pathname === "/media/upload" ? 100_000_000 : 1_000_000);
-    if (url.pathname === "/agent/turns" && platform.config.anthropicApiKey) {
+    if (url.pathname === "/agent/turns") {
       const payload = JSON.parse(body.toString("utf8")) as { projectId?: string; text?: string };
+      const selection = platform.select("llm", "execution");
+      if (!platform.config.anthropicApiKey || !selection.ok || !selection.modelId) {
+        send(response, 200, { configured: false, liveVerified: false, provider: "anthropic", text: "", results: [], stopped: "not-configured" });
+        return;
+      }
       const store = editorFor(platform.db);
-      const model = await anthropicPlanner(platform.config.anthropicApiKey, platform.config.llm.execution[0] ?? "claude-sonnet-5-5");
+      const model = await anthropicPlanner(platform.config.anthropicApiKey, selection.modelId);
       const turn = await runAgentTurn({
         model,
         store,
@@ -94,7 +99,7 @@ async function route(platform: Platform, request: IncomingMessage, response: Ser
         beforeIteration: () => {
           const reserved = reserveForOperation(platform.db, {
             providerId: "anthropic",
-            modelId: platform.config.llm.execution[0] ?? null,
+            modelId: selection.modelId,
             operation: "input_tokens",
             quantity: 1000,
             limits: limitsFrom(platform.config),
@@ -105,7 +110,7 @@ async function route(platform: Platform, request: IncomingMessage, response: Ser
         },
       });
       saveEditor(platform.db, store);
-      send(response, 200, turn);
+      send(response, 200, { configured: true, ...turn });
       return;
     }
     const handled = await handleStudio({

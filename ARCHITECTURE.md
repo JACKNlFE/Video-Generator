@@ -22,6 +22,6 @@ When `npm run server` is running, Vite proxies `/api` to `127.0.0.1:8787` and th
 
 ## Assistant
 
-Without `ANTHROPIC_API_KEY`, `POST /agent/turns` uses `mockPlanner`. It can apply a glow or a speed change when the message includes `project:<id>` and `clip:<id>`. It does not write transcript text. With a key, the same loop calls the Anthropic Messages API through `@anthropic-ai/sdk` and the configured execution model. That path was not executed here.
+`POST /agent/turns` calls the official Anthropic SDK (`client.messages.create`) with the execution model chosen by the provider registry, then `executeTool` on that same project. If `ANTHROPIC_API_KEY` is missing, the response is `configured: false` and the page says the assistant is not configured. It does not invent a reply. The SDK path is unverified live: tests pass a fake client and do not call Anthropic.
 
 `attachTranscript`, `storeAudioAnalysis`, and `completeRender` are server tools. They are hidden from the model so it cannot invent a transcript or mark a render finished.

@@ -238,8 +238,12 @@ export function App() {
               setAssistantNote("The API is not running. The manual editor on this page still works.");
               return;
             }
-            const body = await response.json() as { liveVerified?: boolean; text?: string };
-            setAssistantNote(body.liveVerified ? body.text ?? "Claude replied." : `Mock planner, not a live model. ${body.text ?? ""}`);
+            const body = await response.json() as { configured?: boolean; liveVerified?: boolean; text?: string };
+            if (body.configured === false) {
+              setAssistantNote("The assistant is not configured.");
+              return;
+            }
+            setAssistantNote(body.liveVerified ? (body.text || "Claude updated the project.") : "The assistant is SDK-backed and has not been live-verified.");
             if (apiMode) await refresh(project.id);
           }).catch(() => setAssistantNote("The API is not running. The manual editor on this page still works."));
         }}>

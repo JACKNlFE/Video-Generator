@@ -5,10 +5,10 @@ import { openDatabase, reserve } from "../persist.mjs";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { mockPlanner, runAgentTurn, type AgentModel } from "./loop";
+import { modelFromAnthropicClient, runAgentTurn, type AgentModel, type AnthropicMessagesClient } from "./loop";
 
 describe("agent loop", () => {
-  it("uses the mock planner to edit the real timeline and stops at an iteration limit", async () => {
+  it("uses a fake Anthropic client to edit the real timeline and stops at an iteration limit", async () => {
     const editor = createEditor();
     const created = executeTool(editor, "createProject", { name: "Agent" });
     if (!created.ok) throw new Error("project");
@@ -20,32 +20,48 @@ describe("agent loop", () => {
     });
     if (!clip.ok) throw new Error("clip");
     const clipId = (clip.output as { clipId: string }).clipId;
+    let calls = 0;
+    const fake: AnthropicMessagesClient = {
+      messages: {
+        async create() {
+          calls += 1;
+          if (calls === 1) {
+            return {
+              stop_reason: "tool_use",
+              content: [{ type: "tool_use", name: "applyEffect", input: { clipId, type: "glow", amount: 0.4 } }],
+            };
+          }
+          return { stop_reason: "end_turn", content: [{ type: "text", text: "Applied." }] };
+        },
+      },
+    };
     const turn = await runAgentTurn({
-      model: mockPlanner(),
+      model: modelFromAnthropicClient(fake, "claude-sonnet-5-5"),
       store: editor,
       projectId: project.id,
-      userText: `project:${project.id} clip:${clipId} add a glow`,
+      userText: "Add a glow to the selected clip.",
       maxIterations: 3,
     });
     expect(turn.liveVerified).toBe(false);
-    expect(turn.provider).toBe("mock");
+    expect(turn.provider).toBe("anthropic");
+    expect(calls).toBeGreaterThan(0);
     expect(turn.results.some((result) => result.ok && result.tool === "applyEffect")).toBe(true);
     const inspected = executeTool(editor, "inspectProject", { projectId: project.id });
     if (!inspected.ok) throw new Error("inspect");
     expect((inspected.output as ProjectView).project.clips[0]?.effects?.[0]?.type).toBe("glow");
 
-    let calls = 0;
+    let loops = 0;
     const looping: AgentModel = {
       liveVerified: false,
-      provider: "mock",
+      provider: "test",
       async complete() {
-        calls += 1;
+        loops += 1;
         return { text: "again", toolCalls: [], stop: false };
       },
     };
     const limited = await runAgentTurn({ model: looping, store: editor, projectId: project.id, userText: "keep going", maxIterations: 2 });
     expect(limited.stopped).toBe("iteration-limit");
-    expect(calls).toBe(2);
+    expect(loops).toBe(2);
   });
 
   it("stops before a second model call when the budget reservation is refused", async () => {
@@ -58,7 +74,7 @@ describe("agent loop", () => {
     let calls = 0;
     const model: AgentModel = {
       liveVerified: false,
-      provider: "mock",
+      provider: "test",
       async complete() {
         calls += 1;
         return { text: "spend", toolCalls: [], stop: false };

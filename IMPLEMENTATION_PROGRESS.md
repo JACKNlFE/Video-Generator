@@ -219,7 +219,7 @@ Recorded about 6:00 PM CT on Wednesday, November 25, 2026. No `ANTHROPIC_API_KEY
 - Subtitle presets and SRT/WebVTT export. Manual text overlays are separate from transcript captions.
 - `alignLyrics` uses the user's tokens only and marks every word `uncertain`. `separateVocals` fails and does not replace audio.
 - ffmpeg analysis (`ffmpeg-energy-v1`), preview mp4 render, and upload extension checks.
-- Assistant loop with iteration and budget gates. Without a key it is the mock planner (`liveVerified: false`). The Anthropic Messages call exists and was not executed.
+- The assistant is SDK-backed and unverified live. `POST /agent/turns` uses `@anthropic-ai/sdk` `messages.create` and then `executeTool` on the same project. Without `ANTHROPIC_API_KEY` the UI says the assistant is not configured. Tests inject a fake SDK client and do not call Anthropic.
 - `/api` proxy so the page and the API can share one server project when the API is up.
 
 ### What is not live-verified
@@ -228,7 +228,7 @@ Claude, AssemblyAI, OpenAI, and Fal were not called. Librosa and Demucs are not 
 
 ### Verification
 
-`npx tsc --noEmit --pretty false` exited 0. `npm test` exited 0: 10 files, 45 tests. That includes the original 6 editor registry tests, 3 production editor tests, 2 agent-loop tests, and 1 ffmpeg media test. The media test generated a tone, found the silenced middle, and wrote a preview mp4.
+Re-checked about 6:06 PM CT after replacing the mock assistant. `npx tsc --noEmit --pretty false` exited 0. `npm test` exited 0: 10 files, 45 tests. The agent test uses a fake Anthropic SDK client, applies `applyEffect`, and does not call the live API. The ffmpeg test still finds silence in a generated tone and writes a preview mp4. The original 6 editor registry tests passed.
 
 ### Recommended next step
 

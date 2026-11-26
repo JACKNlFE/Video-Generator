@@ -253,7 +253,7 @@ This repository does not yet have a hosting project, a Dockerfile, or a deploy w
 
 ## Editor, captions, and audio
 
-The page uses `/api` when the API process is up (Vite proxies `/api` to port 8787). Assistant turns without `ANTHROPIC_API_KEY` use the mock planner and return `liveVerified: false`. They do not write spoken words.
+The page uses `/api` when the API process is up (Vite proxies `/api` to port 8787). The assistant calls Claude through `@anthropic-ai/sdk` and then the editor tools. Without `ANTHROPIC_API_KEY` the page says the assistant is not configured. That SDK path has not been live-verified.
 
 Transcription jobs do not invent a transcript when AssemblyAI and OpenAI keys are absent. They fail with the provider not configured. Tests pass a fixture transcript into `attachTranscript`. `generateCaptions` only copies words already stored. `editCaptionText` rejects wording changes on those captions.
 

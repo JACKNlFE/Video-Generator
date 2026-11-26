@@ -5,8 +5,26 @@ export type AgentToolCall = { name: string; input: Record<string, unknown> };
 
 export type AgentModel = {
   liveVerified: boolean;
-  provider: "mock" | "anthropic";
+  provider: "anthropic" | "test";
   complete(input: { userText: string; projectVersion: number; tools: readonly string[] }): Promise<{ text: string; toolCalls: AgentToolCall[]; stop: boolean }>;
+};
+
+export type AnthropicMessage = {
+  stop_reason: string | null;
+  content: Array<{ type: "text"; text: string } | { type: "tool_use"; name: string; input: unknown }>;
+};
+
+/** The slice of the official Anthropic SDK this chat calls. Tests pass a fake. */
+export type AnthropicMessagesClient = {
+  messages: {
+    create(body: {
+      model: string;
+      max_tokens: number;
+      system: string;
+      tools: Array<{ name: string; description: string; input_schema: { type: "object"; additionalProperties: boolean } }>;
+      messages: Array<{ role: "user"; content: string }>;
+    }): Promise<AnthropicMessage>;
+  };
 };
 
 const HIDDEN_FROM_MODEL = new Set(["attachTranscript", "storeAudioAnalysis", "completeRender", "separateVocals"]);
@@ -15,27 +33,39 @@ export function agentToolNames(): string[] {
   return listSupportedTools().filter((name) => !HIDDEN_FROM_MODEL.has(name));
 }
 
-export function mockPlanner(): AgentModel {
-  return {
+export function modelFromAnthropicClient(client: AnthropicMessagesClient, modelId: string, options?: { liveAfterResponse?: boolean }): AgentModel {
+  const model: AgentModel = {
     liveVerified: false,
-    provider: "mock",
-    async complete({ userText, projectVersion }) {
-      const projectId = readId(userText, "project");
-      const clipId = readId(userText, "clip");
-      const calls: AgentToolCall[] = [];
-      if (/glow/i.test(userText) && projectId && clipId) {
-        calls.push({ name: "applyEffect", input: { projectId, expectedVersion: projectVersion, clipId, type: "glow", amount: 0.4 } });
-      }
-      if (/faster|speed/i.test(userText) && projectId && clipId) {
-        calls.push({ name: "setClipSpeed", input: { projectId, expectedVersion: projectVersion, clipId, speed: 2 } });
-      }
-      return {
-        text: calls.length > 0 ? "Mock planner queued editor tools. This was not a Claude response." : "Mock planner: no Claude key is configured, so this sentence was not sent to a model.",
-        toolCalls: calls,
-        stop: true,
-      };
+    provider: "anthropic",
+    async complete({ userText, tools }) {
+      const response = await client.messages.create({
+        model: modelId,
+        max_tokens: 800,
+        system: "Call tools to edit the project. Never invent spoken words or lyrics. If a transcript is missing, say so.",
+        tools: tools.map((name) => ({
+          name,
+          description: `Editor tool ${name}. The server sets projectId and expectedVersion.`,
+          input_schema: { type: "object" as const, additionalProperties: true },
+        })),
+        messages: [{ role: "user", content: userText }],
+      });
+      if (options?.liveAfterResponse) model.liveVerified = true;
+      return readAnthropicMessage(response);
     },
   };
+  return model;
+}
+
+export function readAnthropicMessage(response: AnthropicMessage): { text: string; toolCalls: AgentToolCall[]; stop: boolean } {
+  const toolCalls: AgentToolCall[] = [];
+  const texts: string[] = [];
+  for (const block of response.content) {
+    if (block.type === "text") texts.push(block.text);
+    if (block.type === "tool_use" && block.input && typeof block.input === "object") {
+      toolCalls.push({ name: block.name, input: block.input as Record<string, unknown> });
+    }
+  }
+  return { text: texts.join("\n"), toolCalls, stop: response.stop_reason !== "tool_use" };
 }
 
 export async function runAgentTurn(input: {
@@ -59,12 +89,12 @@ export async function runAgentTurn(input: {
     const turn = await input.model.complete({ userText: input.userText, projectVersion: version, tools: agentToolNames() });
     text = turn.text;
     if (turn.toolCalls.length > 1) {
-      const batch = applyBatch(input.store, turn.toolCalls, version);
+      const batch = applyBatch(input.store, turn.toolCalls, version, input.projectId);
       results.push(...batch.results);
       if (!batch.ok) return { provider: input.model.provider, liveVerified: input.model.liveVerified, text, results, stopped: "tool-error" };
     } else {
       for (const call of turn.toolCalls) {
-        const result = executeTool(input.store, call.name, { ...call.input, expectedVersion: version });
+        const result = executeTool(input.store, call.name, { ...call.input, projectId: input.projectId, expectedVersion: version });
         results.push(result);
         if (!result.ok) return { provider: input.model.provider, liveVerified: input.model.liveVerified, text, results, stopped: "tool-error" };
       }
@@ -74,17 +104,17 @@ export async function runAgentTurn(input: {
   return { provider: input.model.provider, liveVerified: input.model.liveVerified, text, results, stopped: "iteration-limit" };
 }
 
-function applyBatch(store: EditorStore, calls: AgentToolCall[], version: number): { ok: boolean; results: ToolResult[] } {
-  const checkpoint = executeTool(store, "createCheckpoint", { projectId: String(calls[0]?.input.projectId ?? ""), expectedVersion: version, label: "Before batch" });
+function applyBatch(store: EditorStore, calls: AgentToolCall[], version: number, projectId: string): { ok: boolean; results: ToolResult[] } {
+  const checkpoint = executeTool(store, "createCheckpoint", { projectId, expectedVersion: version, label: "Before batch" });
   if (!checkpoint.ok) return { ok: false, results: [checkpoint] };
   const results: ToolResult[] = [];
   let current = version;
   for (const call of calls) {
-    const result = executeTool(store, call.name, { ...call.input, expectedVersion: current });
+    const result = executeTool(store, call.name, { ...call.input, projectId, expectedVersion: current });
     results.push(result);
     if (!result.ok) {
       const restored = executeTool(store, "restoreCheckpoint", {
-        projectId: String(call.input.projectId ?? ""),
+        projectId,
         expectedVersion: current,
         checkpointId: (checkpoint.output as { checkpointId: string }).checkpointId,
       });
@@ -97,39 +127,7 @@ function applyBatch(store: EditorStore, calls: AgentToolCall[], version: number)
 }
 
 export async function anthropicPlanner(apiKey: string, modelId: string): Promise<AgentModel> {
-  const model: AgentModel = {
-    liveVerified: false,
-    provider: "anthropic",
-    async complete({ userText, tools }) {
-      const { default: Anthropic } = await import("@anthropic-ai/sdk");
-      const client = new Anthropic({ apiKey, maxRetries: 0, timeout: 30_000 });
-      const response = await client.messages.create({
-        model: modelId,
-        max_tokens: 800,
-        system: "Call tools to edit the project. Never invent spoken words or lyrics. If a transcript is missing, say so.",
-        tools: tools.map((name) => ({
-          name,
-          description: `Editor tool ${name}. The server fills expectedVersion.`,
-          input_schema: { type: "object" as const, additionalProperties: true },
-        })),
-        messages: [{ role: "user", content: userText }],
-      });
-      model.liveVerified = true;
-      const toolCalls: AgentToolCall[] = [];
-      const texts: string[] = [];
-      for (const block of response.content) {
-        if (block.type === "text") texts.push(block.text);
-        if (block.type === "tool_use" && block.input && typeof block.input === "object") {
-          toolCalls.push({ name: block.name, input: block.input as Record<string, unknown> });
-        }
-      }
-      return { text: texts.join("\n"), toolCalls, stop: response.stop_reason !== "tool_use" };
-    },
-  };
-  return model;
-}
-
-function readId(text: string, label: string): string | null {
-  const match = new RegExp(`${label}:([0-9a-f-]{36})`, "i").exec(text);
-  return match?.[1] ?? null;
+  const { default: Anthropic } = await import("@anthropic-ai/sdk");
+  const client = new Anthropic({ apiKey, maxRetries: 0, timeout: 30_000 });
+  return modelFromAnthropicClient(client as unknown as AnthropicMessagesClient, modelId, { liveAfterResponse: true });
 }
