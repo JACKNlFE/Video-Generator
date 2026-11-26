@@ -59,6 +59,7 @@ export function App() {
   const [apiMode, setApiMode] = useState(false);
   const [assistantText, setAssistantText] = useState("");
   const [assistantNote, setAssistantNote] = useState<string | null>(null);
+  const [providerLines, setProviderLines] = useState<string[]>([]);
 
   async function postTool(name: string, input: unknown): Promise<ToolResult> {
     const response = await fetch("/api/editor/tools", {
@@ -253,6 +254,17 @@ export function App() {
           </label>
           <button type="submit">Ask</button>
           {assistantNote ? <p className="hint">{assistantNote}</p> : null}
+          <button type="button" onClick={() => {
+            void fetch("/api/health").then(async (response) => {
+              if (!response.ok) {
+                setProviderLines(["API offline. Optional providers are not required for manual edits."]);
+                return;
+              }
+              const body = await response.json() as { reports?: Array<{ providerId: string; status: string }> };
+              setProviderLines((body.reports ?? []).map((report) => `${report.providerId}: ${report.status}`));
+            }).catch(() => setProviderLines(["API offline. Optional providers are not required for manual edits."]));
+          }}>Check providers</button>
+          {providerLines.map((line) => <p key={line} className="hint">{line}</p>)}
         </form>
         <div className="history">
           <span className="version" data-testid="version">
