@@ -93,11 +93,11 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
       dailyMicros: usd(env, "MAX_DAILY_SPEND_USD"),
       monthlyMicros: usd(env, "MAX_MONTHLY_SPEND_USD"),
     },
-    jobsDbPath: optional(env, "JOBS_DB_PATH") ?? "data/platform.sqlite",
-    mediaRoot: optional(env, "MEDIA_ROOT") ?? "data/media",
+    jobsDbPath: persistedPath(env, "JOBS_DB_PATH", "platform.sqlite", "data/platform.sqlite"),
+    mediaRoot: persistedPath(env, "MEDIA_ROOT", "media", "data/media"),
     providerHealthVerify: flag(env, "PROVIDER_HEALTH_VERIFY"),
     port: port(env),
-    host: optional(env, "HOST") ?? "127.0.0.1",
+    host: listenHost(env),
     appAuthToken: optional(env, "APP_AUTH_TOKEN"),
     mediaSigningSecret: optional(env, "MEDIA_SIGNING_SECRET"),
   };
@@ -159,6 +159,60 @@ function flag(env: NodeJS.ProcessEnv, name: string): boolean {
   if (value === "1" || value.toLowerCase() === "true") return true;
   if (value === "0" || value.toLowerCase() === "false") return false;
   throw new Error(`${name} must be true or false.`);
+}
+
+export function startupWarnings(env: NodeJS.ProcessEnv): string[] {
+  if (!railwayMarker(env)) return [];
+  const warnings: string[] = [];
+  const mount = volumeMount(env);
+  if (!mount) {
+    warnings.push("No Railway volume is mounted. Jobs and uploads will disappear on the next deploy. Add a volume, for example at /data, and set JOBS_DB_PATH and MEDIA_ROOT on it.");
+    return warnings;
+  }
+  const config = loadConfig(env);
+  if (!onMount(config.jobsDbPath, mount)) {
+    warnings.push(`JOBS_DB_PATH is ${config.jobsDbPath}, which is not on the volume ${mount}. It will not survive a redeploy.`);
+  }
+  if (!onMount(config.mediaRoot, mount)) {
+    warnings.push(`MEDIA_ROOT is ${config.mediaRoot}, which is not on the volume ${mount}. Uploads will not survive a redeploy.`);
+  }
+  return warnings;
+}
+
+function listenHost(env: NodeJS.ProcessEnv): string {
+  // Railway injects PORT. Bind every interface so its proxy can reach the process,
+  // even if HOST was copied from the local example as 127.0.0.1.
+  if (railwayMarker(env) && optional(env, "PORT")) return "0.0.0.0";
+  const explicit = optional(env, "HOST");
+  if (explicit) return explicit;
+  if (optional(env, "PORT")) return "0.0.0.0";
+  return "127.0.0.1";
+}
+
+function persistedPath(env: NodeJS.ProcessEnv, name: string, leaf: string, fallback: string): string {
+  const explicit = optional(env, name);
+  if (explicit) return explicit;
+  const mount = volumeMount(env);
+  if (mount) return `${mount}/${leaf}`;
+  return fallback;
+}
+
+function volumeMount(env: NodeJS.ProcessEnv): string | null {
+  const value = env.RAILWAY_VOLUME_MOUNT_PATH;
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim().replace(/\/+$/, "");
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function railwayMarker(env: NodeJS.ProcessEnv): boolean {
+  return ["RAILWAY_ENVIRONMENT", "RAILWAY_ENVIRONMENT_ID", "RAILWAY_PROJECT_ID", "RAILWAY_SERVICE_ID"].some((name) => {
+    const value = env[name];
+    return typeof value === "string" && value.trim().length > 0;
+  });
+}
+
+function onMount(path: string, mount: string): boolean {
+  return path === mount || path.startsWith(`${mount}/`);
 }
 
 function port(env: NodeJS.ProcessEnv): number {

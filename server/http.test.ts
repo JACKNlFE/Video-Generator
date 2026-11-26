@@ -1,5 +1,6 @@
 import { createHash, generateKeyPairSync, sign } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -9,6 +10,7 @@ import { mediaWorkerSignature } from "./webhooks";
 import { createPlatform } from "./platform";
 import { openDatabase } from "./persist.mjs";
 import type { PersistDatabase } from "./persist.d.mts";
+import { resolveInside } from "./static";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -17,14 +19,26 @@ afterEach(() => {
 
 const fixedNow = () => new Date(1764100000 * 1000);
 
-async function boot(env: Record<string, string> = {}, fetchImpl?: typeof fetch): Promise<{ handle: ServerHandle; db: PersistDatabase; base: string }> {
+async function boot(env: Record<string, string> = {}, fetchImpl?: typeof fetch, staticRoot: string | null = null): Promise<{ handle: ServerHandle; db: PersistDatabase; base: string }> {
   const dir = mkdtempSync(join(tmpdir(), "vg-http-"));
   dirs.push(dir);
   const config = loadConfig({ ...env, JOBS_DB_PATH: join(dir, "jobs.sqlite"), MEDIA_ROOT: join(dir, "media"), HOST: "127.0.0.1" });
   const db = openDatabase(config.jobsDbPath);
   const platform = createPlatform(config, db);
-  const handle = await startServer(platform, { port: 0, now: fixedNow, fetchImpl });
+  const handle = await startServer(platform, { port: 0, now: fixedNow, fetchImpl, staticRoot });
   return { handle, db, base: `http://127.0.0.1:${handle.port}` };
+}
+
+function rawGet(port: number, path: string): Promise<{ status: number; body: string }> {
+  return new Promise((resolve, reject) => {
+    const req = httpRequest({ host: "127.0.0.1", port, path, method: "GET" }, (res) => {
+      const chunks: Buffer[] = [];
+      res.on("data", (chunk: Buffer) => chunks.push(chunk));
+      res.on("end", () => resolve({ status: res.statusCode ?? 0, body: Buffer.concat(chunks).toString("utf8") }));
+    });
+    req.on("error", reject);
+    req.end();
+  });
 }
 
 describe("http api", () => {
@@ -36,6 +50,10 @@ describe("http api", () => {
     expect(body.ok).toBe(true);
     expect(body.reports.find((report) => report.providerId === "anthropic")?.status).toBe("not configured");
     expect(body.reports.find((report) => report.providerId === "sqlite")?.status).toBe("connected and verified");
+    const viaApi = await fetch(`${base}/api/health`);
+    expect(viaApi.status).toBe(200);
+    const address = handle.server.address();
+    expect(address && typeof address === "object" ? address.address : "").toBe("127.0.0.1");
     await handle.close();
     db.close();
   });
@@ -169,6 +187,68 @@ describe("http api", () => {
       body: raw,
     });
     expect(completedProgress.status).toBe(409);
+    await handle.close();
+    db.close();
+  });
+
+  it("serves the built editor and the API on one origin", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vg-static-"));
+    dirs.push(dir);
+    const root = join(dir, "dist");
+    mkdirSync(join(root, "assets"), { recursive: true });
+    writeFileSync(join(root, "index.html"), "<!doctype html><div id=\"root\"></div>");
+    writeFileSync(join(root, "assets", "app.js"), "console.log('editor')");
+    writeFileSync(join(dir, "secret.txt"), "volume-secret");
+    const { handle, db, base } = await boot({}, undefined, root);
+    const page = await fetch(`${base}/`);
+    expect(page.status).toBe(200);
+    expect(page.headers.get("content-type")).toContain("text/html");
+    expect(await page.text()).toContain('id="root"');
+    const script = await fetch(`${base}/assets/app.js`);
+    expect(script.status).toBe(200);
+    expect(script.headers.get("content-type")).toContain("javascript");
+    expect(await script.text()).toContain("editor");
+    const health = await fetch(`${base}/api/health`);
+    expect(health.status).toBe(200);
+    const body = await health.json() as { ok: boolean };
+    expect(body.ok).toBe(true);
+    const created = await fetch(`${base}/api/jobs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ kind: "media.probe", payload: { name: "city" } }),
+    });
+    expect(created.status).toBe(202);
+    const deep = await fetch(`${base}/library`, { headers: { accept: "text/html" } });
+    expect(await deep.text()).toContain('id="root"');
+    const missing = await fetch(`${base}/assets/missing.js`);
+    expect(missing.status).toBe(404);
+    const missingBody = await missing.json() as { error: { code: string } };
+    expect(missingBody.error.code).toBe("not_found");
+    expect(resolveInside(root, "/../secret.txt")).toBeNull();
+    expect(resolveInside(root, "/%2e%2e/secret.txt")).toBeNull();
+    const escaped = await rawGet(handle.port, "/../secret.txt");
+    const encoded = await rawGet(handle.port, "/%2e%2e/secret.txt");
+    expect(escaped.body).not.toContain("volume-secret");
+    expect(encoded.body).not.toContain("volume-secret");
+    await handle.close();
+    db.close();
+  });
+
+  it("binds 0.0.0.0 when Railway sets PORT", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vg-bind-"));
+    dirs.push(dir);
+    const config = loadConfig({
+      PORT: "8080",
+      HOST: "127.0.0.1",
+      RAILWAY_ENVIRONMENT: "production",
+      JOBS_DB_PATH: join(dir, "jobs.sqlite"),
+      MEDIA_ROOT: join(dir, "media"),
+    });
+    expect(config.host).toBe("0.0.0.0");
+    const db = openDatabase(config.jobsDbPath);
+    const handle = await startServer(createPlatform(config, db), { port: 0, staticRoot: null });
+    const address = handle.server.address();
+    expect(address && typeof address === "object" ? address.address : "").toBe("0.0.0.0");
     await handle.close();
     db.close();
   });

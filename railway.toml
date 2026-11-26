@@ -1,0 +1,14 @@
+# One service. Railway uses the root Dockerfile.
+# This file is read for new services until 2026-12-01. The image command is the same
+# `npm run server`, so the process still starts after that date.
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+startCommand = "npm run server"
+healthcheckPath = "/health"
+healthcheckTimeout = 120
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 5

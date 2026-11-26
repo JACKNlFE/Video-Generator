@@ -1,4 +1,6 @@
+import { existsSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { join } from "node:path";
 import { z } from "zod";
 import { anthropicPlanner, runAgentTurn } from "./agent/loop";
 import { limitsFrom, reserveForOperation } from "./cost";
@@ -17,6 +19,7 @@ import {
 } from "./persist.mjs";
 import { allowRequest, authorized } from "./security";
 import { editorFor, handleStudio, saveEditor } from "./studio";
+import { serveStatic } from "./static";
 import { loadFalJwks, verifyFalSignature, verifyMediaWorkerSignature, verifySharedSecret, type FalJwk } from "./webhooks";
 
 const JOB_KINDS = ["video.generate", "image.generate", "audio.transcribe", "audio.separate", "audio.align", "media.render", "media.probe"] as const;
@@ -44,15 +47,16 @@ const reserveBody = z.object({
 const reconcileBody = z.object({ actualUsd: z.string().regex(/^\d+(?:\.\d{1,6})?$/) }).strict();
 const progressBody = z.object({ progress: z.number().int().min(0).max(100) }).strict();
 
-export type ServerHandle = { server: Server; port: number; close: () => Promise<void> };
+export type ServerHandle = { server: Server; port: number; editorRoot: string | null; close: () => Promise<void> };
 
-export function startServer(platform: Platform, options: { port?: number; fetchImpl?: typeof fetch; now?: () => Date } = {}): Promise<ServerHandle> {
+export function startServer(platform: Platform, options: { port?: number; fetchImpl?: typeof fetch; now?: () => Date; staticRoot?: string | null } = {}): Promise<ServerHandle> {
   const fetchImpl = options.fetchImpl ?? fetch;
   const now = options.now ?? (() => new Date());
+  const staticRoot = options.staticRoot === undefined ? defaultEditorRoot() : options.staticRoot;
   const jwksCache: { keys: FalJwk[] | null; fetchedAt: number } = { keys: null, fetchedAt: 0 };
   const server = createServer(async (request, response) => {
     try {
-      await route(platform, request, response, { fetchImpl, now, jwksCache });
+      await route(platform, request, response, { fetchImpl, now, jwksCache, staticRoot });
     } catch (error) {
       if (error instanceof SyntaxError) {
         send(response, 400, { error: { code: "validation", message: "The request body is not JSON." } });
@@ -71,15 +75,19 @@ export function startServer(platform: Platform, options: { port?: number; fetchI
       resolve({
         server,
         port: actual,
+        editorRoot: staticRoot,
         close: () => new Promise((done, reject) => server.close((error) => (error ? reject(error) : done()))),
       });
     });
   });
 }
 
-async function route(platform: Platform, request: IncomingMessage, response: ServerResponse, deps: { fetchImpl: typeof fetch; now: () => Date; jwksCache: { keys: FalJwk[] | null; fetchedAt: number } }) {
+async function route(platform: Platform, request: IncomingMessage, response: ServerResponse, deps: { fetchImpl: typeof fetch; now: () => Date; jwksCache: { keys: FalJwk[] | null; fetchedAt: number }; staticRoot: string | null }) {
   const url = new URL(request.url ?? "/", "http://127.0.0.1");
   const method = request.method ?? "GET";
+  const apiPrefixed = url.pathname === "/api" || url.pathname.startsWith("/api/");
+  if (url.pathname === "/api") url.pathname = "/";
+  else if (url.pathname.startsWith("/api/")) url.pathname = url.pathname.slice(4);
   if (!allowRequest(request.socket.remoteAddress ?? "local", deps.now().getTime())) {
     send(response, 429, { error: { code: "rate_limited", message: "Too many requests." } });
     return;
@@ -226,7 +234,13 @@ async function route(platform: Platform, request: IncomingMessage, response: Ser
       return send(response, 200, result);
     }
   }
+  if (!apiPrefixed && (method === "GET" || method === "HEAD") && deps.staticRoot && serveStatic(deps.staticRoot, url.pathname, request, response, method)) return;
   send(response, 404, { error: { code: "not_found", message: "Not found." } });
+}
+
+function defaultEditorRoot(): string | null {
+  const root = join(process.cwd(), "dist");
+  return existsSync(root) ? root : null;
 }
 
 async function createReservation(platform: Platform, request: IncomingMessage, response: ServerResponse, deps: { now: () => Date }) {

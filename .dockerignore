@@ -1,0 +1,12 @@
+node_modules
+dist
+.git
+.github
+data
+.env
+.env.*
+!.env.example
+*.sqlite
+*.sqlite-*
+*.log
+.DS_Store
