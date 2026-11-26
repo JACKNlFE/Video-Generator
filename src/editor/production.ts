@@ -290,6 +290,22 @@ export function completeRender(store: EditorStore, input: Versioned & { renderId
   });
 }
 
+export function queueGeneration(store: EditorStore, input: Versioned & { kind: "image" | "video"; endpointId: string; prompt: string }): ToolResult<{ generationId: string; status: "queued"; liveVerified: false }> {
+  const generationId = crypto.randomUUID();
+  return edit(store, input.kind === "video" ? "generateVideo" : "generateImage", input.projectId, input.expectedVersion, (draft) => {
+    draft.generations = [...(draft.generations ?? []), {
+      id: generationId,
+      kind: input.kind,
+      endpointId: input.endpointId,
+      prompt: input.prompt,
+      status: "queued",
+      liveVerified: false,
+      fileName: null,
+    }];
+    return { ok: true, extra: { generationId, status: "queued" as const, liveVerified: false as const } };
+  });
+}
+
 export function separateVocals(): ToolResult {
   return fail("separateVocals", "INVALID_EDIT", "Vocal separation is not available. Demucs is not installed, and no hosted separator is configured. The original audio was not changed.");
 }

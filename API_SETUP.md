@@ -265,6 +265,12 @@ Preview and export rendering use ffmpeg (`libx264`, optional `subtitles` burn-in
 
 Uploads accepted by extension are mp3, wav, m4a, aac, flac, mp4, mov, and webm, up to 100 MB. Duration comes from ffprobe.
 
-## Not in this stage
+## Fal generation catalog
 
-No Fal generation and no Trigger.dev task runs. Claude, AssemblyAI, and OpenAI were not called in this environment because their keys are unset.
+Endpoint ids checked on November 25, 2026 are listed in `server/providers/fal-catalog.ts`. Every price is unset. Runway is omitted because those pages did not give an endpoint id. Video generation is not selected when the request says a music track is already in use, because a silent-audio parameter was not verified. Budget mode does not pick a text-to-video model for the same reason. `generateImage` and `generateVideo` only queue a row with `liveVerified: false`. `submitFalGeneration` returns `not_configured` when `FAL_KEY` is empty and does not call Fal. No live Fal response was recorded.
+
+Fast routing uses the execution model only. Advanced uses the review model for planning and review. Maximum uses the creative model for planning, the execution model for edits, and the review model for review. Those ids are the configured Claude ids. The models were not called.
+
+## Not live-verified here
+
+Claude, AssemblyAI, OpenAI, and Fal were not called. Trigger.dev tasks are not dispatched. Librosa and Demucs are not installed.

@@ -205,6 +205,18 @@ export const renderRequestSchema = z
   })
   .strict();
 
+export const generationRequestSchema = z
+  .object({
+    id: idSchema,
+    kind: z.enum(["image", "video"]),
+    endpointId: z.string().min(1).max(160),
+    prompt: z.string().min(1).max(2000),
+    status: z.enum(["queued", "submitted", "failed"]),
+    liveVerified: z.boolean(),
+    fileName: z.string().min(1).max(240).nullable(),
+  })
+  .strict();
+
 export const projectSchema = z
   .object({
     id: idSchema,
@@ -219,6 +231,7 @@ export const projectSchema = z
     transcripts: z.array(transcriptSchema).optional(),
     analyses: z.array(audioAnalysisSchema).optional(),
     renders: z.array(renderRequestSchema).optional(),
+    generations: z.array(generationRequestSchema).optional(),
   })
   .strict();
 
@@ -473,6 +486,8 @@ export const supportedTools = [
   "exportVideo",
   "completeRender",
   "separateVocals",
+  "generateVideo",
+  "generateImage",
 ] as const;
 
 export type SupportedTool = (typeof supportedTools)[number];

@@ -230,6 +230,16 @@ Claude, AssemblyAI, OpenAI, and Fal were not called. Librosa and Demucs are not 
 
 Re-checked about 6:06 PM CT after replacing the mock assistant. `npx tsc --noEmit --pretty false` exited 0. `npm test` exited 0: 10 files, 45 tests. The agent test uses a fake Anthropic SDK client, applies `applyEffect`, and does not call the live API. The ffmpeg test still finds silence in a generated tone and writes a preview mp4. The original 6 editor registry tests passed.
 
+### Recommendation at the end of Step A
+
+Step B follows on the next branch.
+
+## Step B — Generative catalog and routing
+
+Recorded about 6:01 PM CT on Wednesday, November 25, 2026. `npm test` exited 0 with 11 files and 47 tests. `npx tsc --noEmit --pretty false` exited 0 before that run. No Fal key was set, and Fal was not called.
+
+Verified endpoint ids, with prices left null: `fal-ai/veo3.1`, Kling v3 Pro text-to-video and image-to-video, `fal-ai/ltx-2.3/audio-to-video`, `alibaba/wan-3.0-prime/reference-to-video`, `bytedance/seedance-2.5/text-to-video`, `fal-ai/flux/schnell`, and `fal-ai/flux-pro/v1.1`. Runway is omitted. Music requests do not select a video model. Budget mode does not select text-to-video. `generateImage` / `generateVideo` only queue `liveVerified: false`. Fast, advanced, and maximum routes pick the configured Claude ids and do not call them. Quality checks look at the timeline only.
+
 ### Recommended next step
 
-Step B, not started in this commit: Fal generation using only endpoint ids taken from current docs, with prices left unset where the docs do not state them.
+Step C: owner-facing setup docs, the remaining panels, and an honest requirement trace. Do not call the app production-ready.

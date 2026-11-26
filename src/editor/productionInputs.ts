@@ -86,6 +86,15 @@ export const segmentsOutput = mutationSchema.extend({ segmentIds: z.array(z.stri
 export const mediaOutput = mutationSchema.extend({ mediaId: z.string().uuid() }).strict();
 export const renderOutput = mutationSchema.extend({ renderId: z.string().uuid() }).strict();
 export const transcriptOutput = mutationSchema.extend({ transcriptId: z.string().uuid() }).strict();
+export const queueGenerationInput = versionedInput.extend({
+  endpointId: z.string().min(1).max(160),
+  prompt: z.string().trim().min(1).max(2000),
+}).strict();
+export const generationOutput = mutationSchema.extend({
+  generationId: z.string().uuid(),
+  status: z.literal("queued"),
+  liveVerified: z.literal(false),
+}).strict();
 export const completeRenderInput = versionedInput.extend({
   renderId: z.string().uuid(),
   status: z.enum(["completed", "failed"]),
