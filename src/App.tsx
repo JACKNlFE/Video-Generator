@@ -2,7 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { browserEditor, ensureProject, rememberProject } from "./editor/browserEditor";
 import { executeTool } from "./editor/registry";
 import type { ProjectView, TimelineView } from "./editor/schema";
-import type { ToolError } from "./editor/store";
+import type { ToolError, ToolResult } from "./editor/store";
 
 function formatError(error: ToolError): string {
   const issues = error.details?.issues;
@@ -56,10 +56,22 @@ export function App() {
   const [trimOut, setTrimOut] = useState("0");
   const [splitAt, setSplitAt] = useState("0");
   const [checkpointLabel, setCheckpointLabel] = useState("Checkpoint");
+  const [apiMode, setApiMode] = useState(false);
+  const [assistantText, setAssistantText] = useState("");
+  const [assistantNote, setAssistantNote] = useState<string | null>(null);
 
-  function refresh(projectId: string, nextSelected?: string | null) {
-    const inspected = executeTool(browserEditor, "inspectProject", { projectId });
-    const timed = executeTool(browserEditor, "inspectTimeline", { projectId });
+  async function postTool(name: string, input: unknown): Promise<ToolResult> {
+    const response = await fetch("/api/editor/tools", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name, input }),
+    });
+    return response.json() as Promise<ToolResult>;
+  }
+
+  async function refresh(projectId: string, nextSelected?: string | null) {
+    const inspected = apiMode ? await postTool("inspectProject", { projectId }) : executeTool(browserEditor, "inspectProject", { projectId });
+    const timed = apiMode ? await postTool("inspectTimeline", { projectId }) : executeTool(browserEditor, "inspectTimeline", { projectId });
     if (!inspected.ok) {
       setError(formatError(inspected.error));
       return;
@@ -82,13 +94,13 @@ export function App() {
     });
   }
 
-  function run(tool: string, input: unknown, success: string, nextSelected?: string | null): unknown {
-    const result = executeTool(browserEditor, tool, input);
+  async function run(tool: string, input: unknown, success: string, nextSelected?: string | null): Promise<unknown> {
+    const result = apiMode ? await postTool(tool, input) : executeTool(browserEditor, tool, input);
     if (!result.ok) {
       setStatus(null);
       setError(formatError(result.error));
       const projectId = view?.project.id ?? null;
-      if (projectId) refresh(projectId);
+      if (projectId) await refresh(projectId);
       return null;
     }
     setError(null);
@@ -96,19 +108,44 @@ export function App() {
     const projectId = idFrom(result.output, view?.project.id ?? null);
     if (projectId) {
       rememberProject(projectId);
-      refresh(projectId, nextSelected);
+      await refresh(projectId, nextSelected);
     }
     return result.output;
   }
 
   useEffect(() => {
-    const created = ensureProject(projectName.trim() || "Untitled");
-    if (!created.ok) {
-      setError(formatError(created.error));
-      return;
-    }
-    rememberProject(created.output.project.id);
-    refresh(created.output.project.id);
+    let cancelled = false;
+    (async () => {
+      try {
+        const health = await fetch("/api/health");
+        if (!health.ok) throw new Error("offline");
+        const created = await postTool("createProject", { name: projectName.trim() || "Untitled" });
+        if (cancelled || !created.ok) throw new Error("create");
+        const createdView = created.output as ProjectView;
+        setApiMode(true);
+        rememberProject(createdView.project.id);
+        const timed = await postTool("inspectTimeline", { projectId: createdView.project.id });
+        if (!cancelled && timed.ok) {
+          setView(createdView);
+          setTimeline(timed.output as TimelineView);
+        }
+      } catch {
+        if (cancelled) return;
+        const created = ensureProject(projectName.trim() || "Untitled");
+        if (!created.ok) {
+          setError(formatError(created.error));
+          return;
+        }
+        rememberProject(created.output.project.id);
+        const inspected = executeTool(browserEditor, "inspectProject", { projectId: created.output.project.id });
+        const timed = executeTool(browserEditor, "inspectTimeline", { projectId: created.output.project.id });
+        if (inspected.ok) setView(inspected.output as ProjectView);
+        if (timed.ok) setTimeline(timed.output as TimelineView);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
     // The page boots once. Later project switches go through New project.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -125,9 +162,9 @@ export function App() {
     setSplitAt(String(midpoint));
   }, [selected]);
 
-  function onNewProject(event: FormEvent) {
+  async function onNewProject(event: FormEvent) {
     event.preventDefault();
-    const output = run("createProject", { name: projectName.trim() || "Untitled" }, "Created a project.", null);
+    const output = await run("createProject", { name: projectName.trim() || "Untitled" }, "Created a project.", null);
     if (output && typeof output === "object" && "project" in output) {
       const id = idFrom(output, null);
       if (id) rememberProject(id);
@@ -159,7 +196,7 @@ export function App() {
     setTrackName("");
   }
 
-  function onAddClip(event: FormEvent) {
+  async function onAddClip(event: FormEvent) {
     event.preventDefault();
     if (!project) return;
     const payload: Record<string, unknown> = {
@@ -171,7 +208,7 @@ export function App() {
       sourceInMs: Number(clipIn),
     };
     if (clipOut.trim() !== "") payload.sourceOutMs = Number(clipOut);
-    const output = run("addClip", payload, "Added a clip.");
+    const output = await run("addClip", payload, "Added a clip.");
     if (output && typeof output === "object" && "clipId" in output && typeof output.clipId === "string") {
       refresh(project.id, output.clipId);
     }
@@ -185,10 +222,38 @@ export function App() {
         <div>
           <h1>Video Generator</h1>
           <p>
-            Manual timeline editor. Media entries are references (name, kind, and duration). This version does not
-            generate pictures, transcribe audio, or export a file.
+            Manual timeline editor. When the API is running, this page and the assistant share that project. Without the API, edits stay in this browser tab.
           </p>
         </div>
+        <form className="history" onSubmit={(event) => {
+          event.preventDefault();
+          if (!project) return;
+          const text = `${assistantText} project:${project.id}${selectedClipId ? ` clip:${selectedClipId}` : ""}`;
+          void fetch("/api/agent/turns", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ projectId: project.id, text }),
+          }).then(async (response) => {
+            if (!response.ok) {
+              setAssistantNote("The API is not running. The manual editor on this page still works.");
+              return;
+            }
+            const body = await response.json() as { configured?: boolean; liveVerified?: boolean; text?: string };
+            if (body.configured === false) {
+              setAssistantNote("The assistant is not configured.");
+              return;
+            }
+            setAssistantNote(body.liveVerified ? (body.text || "Claude updated the project.") : "The assistant is SDK-backed and has not been live-verified.");
+            if (apiMode) await refresh(project.id);
+          }).catch(() => setAssistantNote("The API is not running. The manual editor on this page still works."));
+        }}>
+          <label>
+            Assistant
+            <input value={assistantText} onChange={(event) => setAssistantText(event.target.value)} placeholder="Select a clip, then ask for a glow" data-testid="assistant-text" />
+          </label>
+          <button type="submit">Ask</button>
+          {assistantNote ? <p className="hint">{assistantNote}</p> : null}
+        </form>
         <div className="history">
           <span className="version" data-testid="version">
             Version {project?.version ?? "—"}

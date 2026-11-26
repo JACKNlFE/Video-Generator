@@ -204,6 +204,32 @@ The timeline was not clicked again. The editor source did not change, and `src/e
 - `npm audit` reports moderate `@vitest/mocker`, critical `tinypool`, critical `vitest`, and high `zod`. `npm audit fix --force` was not run. Zod was already the Phase 1 dependency.
 - Phase 2 is not started. No agent, generation, or transcription submission was added.
 
+### Recommendation at the end of Stage 1
+
+Phase 2 was the suggested next step. The work below is Step A on a branch stacked on Stage 1. It is not live-verified against paid APIs.
+
+## Step A — Editing, captions, and audio
+
+Recorded about 6:00 PM CT on Wednesday, November 25, 2026. No `ANTHROPIC_API_KEY`, `FAL_KEY`, `ASSEMBLYAI_API_KEY`, or `OPENAI_API_KEY` was set.
+
+### What is implemented
+
+- The same `executeTool` document now stores optional speed, transform, opacity, color, effects, transitions, fades, volume, and keyframes. Phase 1 clips omit those fields and the old tests still pass.
+- Caption tracks, segments, and word times. Moving a clip keeps source times and shifts the derived timeline time. Trimming and splitting retarget words. `editCaptionText` rejects changes to spoken words.
+- Subtitle presets and SRT/WebVTT export. Manual text overlays are separate from transcript captions.
+- `alignLyrics` uses the user's tokens only and marks every word `uncertain`. `separateVocals` fails and does not replace audio.
+- ffmpeg analysis (`ffmpeg-energy-v1`), preview mp4 render, and upload extension checks.
+- The assistant is SDK-backed and unverified live. `POST /agent/turns` uses `@anthropic-ai/sdk` `messages.create` and then `executeTool` on the same project. Without `ANTHROPIC_API_KEY` the UI says the assistant is not configured. Tests inject a fake SDK client and do not call Anthropic.
+- `/api` proxy so the page and the API can share one server project when the API is up.
+
+### What is not live-verified
+
+Claude, AssemblyAI, OpenAI, and Fal were not called. Librosa and Demucs are not installed. No sung-vocal benchmark was run.
+
+### Verification
+
+Re-checked about 6:06 PM CT after replacing the mock assistant. `npx tsc --noEmit --pretty false` exited 0. `npm test` exited 0: 10 files, 45 tests. The agent test uses a fake Anthropic SDK client, applies `applyEffect`, and does not call the live API. The ffmpeg test still finds silence in a generated tone and writes a preview mp4. The original 6 editor registry tests passed.
+
 ### Recommended next step
 
-Phase 2, not started: a single server-side editing agent that reads `ANTHROPIC_API_KEY`, checks the configured model with the existing health probe, and calls `executeTool`. Do not import that client from the Vite app.
+Step B, not started in this commit: Fal generation using only endpoint ids taken from current docs, with prices left unset where the docs do not state them.

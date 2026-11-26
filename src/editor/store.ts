@@ -1,3 +1,4 @@
+import { clipCaptionsToSource, retargetCaptionsOnSplit } from "./captions";
 import {
   MAX_MS,
   type Clip,
@@ -73,8 +74,13 @@ export function clipDurationMs(clip: Pick<Clip, "sourceInMs" | "sourceOutMs">): 
   return clip.sourceOutMs - clip.sourceInMs;
 }
 
+export function playbackMs(clip: Pick<Clip, "sourceInMs" | "sourceOutMs" | "speed">): number {
+  const speed = clip.speed ?? 1;
+  return Math.max(1, Math.round(clipDurationMs(clip) / speed));
+}
+
 export function clipTimelineEndMs(clip: Clip): number {
-  return clip.timelineStartMs + clipDurationMs(clip);
+  return clip.timelineStartMs + playbackMs(clip);
 }
 
 function historyOf(session: Session): ProjectView["history"] {
@@ -126,7 +132,7 @@ function commit(session: Session, next: Project): void {
 
 type ChangeResult<T> = { ok: true; extra: T } | { ok: false; error: ToolError };
 
-function edit<T extends Record<string, unknown>>(
+export function edit<T extends Record<string, unknown>>(
   store: EditorStore,
   tool: string,
   projectId: string,
@@ -301,7 +307,9 @@ export function removeTrack(
       return { ok: false, error: domainError("NOT_FOUND", `Track "${input.trackId}" was not found.`) };
     }
     draft.tracks = draft.tracks.filter((track) => track.id !== input.trackId);
+    const removed = new Set(draft.clips.filter((clip) => clip.trackId === input.trackId).map((clip) => clip.id));
     draft.clips = draft.clips.filter((clip) => clip.trackId !== input.trackId);
+    if (draft.captions) draft.captions = draft.captions.filter((segment) => !removed.has(segment.clipId));
     return { ok: true, extra: {} };
   });
 }
@@ -375,6 +383,7 @@ export function removeClip(
       return { ok: false, error: domainError("NOT_FOUND", `Clip "${input.clipId}" was not found.`) };
     }
     draft.clips = draft.clips.filter((clip) => clip.id !== input.clipId);
+    if (draft.captions) draft.captions = draft.captions.filter((segment) => segment.clipId !== input.clipId);
     return { ok: true, extra: {} };
   });
 }
@@ -386,7 +395,7 @@ export function moveClip(
   return edit(store, "moveClip", input.projectId, input.expectedVersion, (draft) => {
     const clip = findClip(draft, input.clipId);
     if (!clip) return { ok: false, error: domainError("NOT_FOUND", `Clip "${input.clipId}" was not found.`) };
-    const end = input.timelineStartMs + clipDurationMs(clip);
+    const end = input.timelineStartMs + playbackMs(clip);
     if (end > MAX_MS) {
       return { ok: false, error: domainError("INVALID_EDIT", "The clip would extend past 24 hours.") };
     }
@@ -424,15 +433,16 @@ export function trimClip(
         ),
       };
     }
+    const speed = clip.speed ?? 1;
     const delta = sourceInMs - clip.sourceInMs;
-    const timelineStartMs = clip.timelineStartMs + delta;
+    const timelineStartMs = clip.timelineStartMs + Math.round(delta / speed);
     if (timelineStartMs < 0) {
       return {
         ok: false,
         error: domainError("INVALID_EDIT", "Trimming the head would move the clip before the start of the timeline."),
       };
     }
-    const end = timelineStartMs + (sourceOutMs - sourceInMs);
+    const end = timelineStartMs + Math.max(1, Math.round((sourceOutMs - sourceInMs) / speed));
     if (end > MAX_MS) {
       return { ok: false, error: domainError("INVALID_EDIT", "The clip would extend past 24 hours.") };
     }
@@ -442,6 +452,7 @@ export function trimClip(
     clip.sourceInMs = sourceInMs;
     clip.sourceOutMs = sourceOutMs;
     clip.timelineStartMs = timelineStartMs;
+    clipCaptionsToSource(draft, clip.id, sourceInMs, sourceOutMs);
     return { ok: true, extra: {} };
   });
 }
@@ -462,18 +473,19 @@ export function splitClip(
         error: domainError("INVALID_EDIT", `Split time ${input.atMs} ms is outside the clip interior ${start}–${end} ms.`),
       };
     }
-    const leftDuration = input.atMs - start;
-    const rightSourceIn = clip.sourceInMs + leftDuration;
-    draft.clips.push({
-      id: rightClipId,
-      trackId: clip.trackId,
-      mediaId: clip.mediaId,
-      name: clip.name,
-      timelineStartMs: input.atMs,
-      sourceInMs: rightSourceIn,
-      sourceOutMs: clip.sourceOutMs,
-    });
-    clip.sourceOutMs = clip.sourceInMs + leftDuration;
+    const speed = clip.speed ?? 1;
+    const leftSource = Math.round((input.atMs - start) * speed);
+    const rightSourceIn = clip.sourceInMs + leftSource;
+    if (leftSource <= 0 || rightSourceIn >= clip.sourceOutMs) {
+      return { ok: false, error: domainError("INVALID_EDIT", "The split does not leave media on both sides.") };
+    }
+    const right = structuredClone(clip);
+    right.id = rightClipId;
+    right.timelineStartMs = input.atMs;
+    right.sourceInMs = rightSourceIn;
+    draft.clips.push(right);
+    clip.sourceOutMs = rightSourceIn;
+    retargetCaptionsOnSplit(draft, clip.id, rightClipId, rightSourceIn);
     return { ok: true, extra: { leftClipId: clip.id, rightClipId } };
   });
 }

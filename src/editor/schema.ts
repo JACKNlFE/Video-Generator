@@ -24,6 +24,7 @@ export const mediaReferenceSchema = z
     name: z.string().min(1).max(120),
     kind: z.enum(mediaKinds),
     durationMs: z.number().int().positive().max(MAX_MS),
+    fileName: z.string().min(1).max(240).optional(),
   })
   .strict();
 
@@ -45,6 +46,162 @@ export const clipSchema = z
     timelineStartMs: z.number().int().nonnegative().max(MAX_MS),
     sourceInMs: z.number().int().nonnegative().max(MAX_MS),
     sourceOutMs: z.number().int().positive().max(MAX_MS),
+    speed: z.number().positive().max(16).optional(),
+    opacity: z.number().min(0).max(1).optional(),
+    volume: z.number().min(0).max(4).optional(),
+    fadeInMs: z.number().int().nonnegative().max(MAX_MS).optional(),
+    fadeOutMs: z.number().int().nonnegative().max(MAX_MS).optional(),
+    transform: z
+      .object({
+        x: z.number().min(-1).max(2),
+        y: z.number().min(-1).max(2),
+        scale: z.number().positive().max(8),
+        rotation: z.number().min(-360).max(360),
+      })
+      .strict()
+      .optional(),
+    color: z
+      .object({
+        brightness: z.number().min(-1).max(1),
+        contrast: z.number().min(0).max(2),
+        saturation: z.number().min(0).max(2),
+        exposure: z.number().min(-2).max(2),
+      })
+      .strict()
+      .optional(),
+    effects: z
+      .array(
+        z
+          .object({
+            id: idSchema,
+            type: z.enum(["blur", "sharpen", "vignette", "grain", "glow"]),
+            amount: z.number().min(0).max(1),
+          })
+          .strict(),
+      )
+      .optional(),
+    transitionIn: z
+      .object({
+        type: z.enum(["cut", "dissolve", "fade", "wipe"]),
+        durationMs: z.number().int().nonnegative().max(10_000),
+      })
+      .strict()
+      .optional(),
+    keyframes: z
+      .array(
+        z
+          .object({
+            id: idSchema,
+            timeMs: z.number().int().nonnegative().max(MAX_MS),
+            property: z.enum(["opacity", "scale", "x", "y", "rotation", "volume"]),
+            value: z.number(),
+          })
+          .strict(),
+      )
+      .optional(),
+  })
+  .strict();
+
+export const captionStylePresets = ["subtitles", "short-form", "word-highlight", "karaoke", "single-word", "cinematic-lyrics"] as const;
+
+export const captionStyleSchema = z
+  .object({
+    preset: z.enum(captionStylePresets),
+    fontFamily: z.string().min(1).max(80),
+    fontSize: z.number().int().min(8).max(200),
+    color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+    highlightColor: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+    backgroundColor: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+    backgroundOpacity: z.number().min(0).max(1),
+    outlineColor: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+    outlineWidth: z.number().min(0).max(20),
+    position: z.enum(["bottom", "middle", "top"]),
+    safeMarginPx: z.number().int().min(0).max(400),
+    animation: z.enum(["none", "fade", "highlight", "karaoke", "single-word"]),
+  })
+  .strict();
+
+export const captionTrackSchema = z
+  .object({
+    id: idSchema,
+    name: z.string().min(1).max(120),
+    style: captionStyleSchema,
+  })
+  .strict();
+
+export const captionWordSchema = z
+  .object({
+    text: z.string().min(1).max(80),
+    sourceStartMs: z.number().int().nonnegative().max(MAX_MS),
+    sourceEndMs: z.number().int().nonnegative().max(MAX_MS),
+    confidence: z.number().min(0).max(1).nullable(),
+    uncertain: z.boolean(),
+  })
+  .strict();
+
+export const captionSegmentSchema = z
+  .object({
+    id: idSchema,
+    trackId: idSchema,
+    clipId: idSchema,
+    sourceStartMs: z.number().int().nonnegative().max(MAX_MS),
+    sourceEndMs: z.number().int().positive().max(MAX_MS),
+    text: z.string().min(1).max(500),
+    rawText: z.string().min(1).max(500),
+    language: z.string().min(2).max(16).nullable(),
+    speaker: z.string().min(1).max(80).nullable(),
+    confidence: z.number().min(0).max(1).nullable(),
+    words: z.array(captionWordSchema),
+    manual: z.boolean(),
+  })
+  .strict();
+
+export const transcriptWordSchema = captionWordSchema;
+
+export const transcriptSchema = z
+  .object({
+    id: idSchema,
+    mediaId: idSchema,
+    provider: z.enum(["assemblyai", "openai", "mock"]),
+    liveVerified: z.boolean(),
+    language: z.string().min(2).max(16).nullable(),
+    text: z.string().max(100_000),
+    words: z.array(transcriptWordSchema),
+    speakers: z.array(z.string().min(1).max(80)),
+  })
+  .strict();
+
+export const audioAnalysisSchema = z
+  .object({
+    mediaId: idSchema,
+    durationMs: z.number().int().positive(),
+    bpm: z.number().positive().nullable(),
+    beatsMs: z.array(z.number().int().nonnegative()),
+    onsetsMs: z.array(z.number().int().nonnegative()),
+    loudnessLufs: z.number().nullable(),
+    peakDb: z.number().nullable(),
+    silence: z.array(z.object({ startMs: z.number().int().nonnegative(), endMs: z.number().int().nonnegative() }).strict()),
+    clipping: z.boolean(),
+    dropsMs: z.array(z.number().int().nonnegative()),
+    sections: z.array(
+      z.object({
+        startMs: z.number().int().nonnegative(),
+        endMs: z.number().int().nonnegative(),
+        label: z.enum(["low", "mid", "high"]),
+      }).strict(),
+    ),
+    method: z.literal("ffmpeg-energy-v1"),
+  })
+  .strict();
+
+export const renderRequestSchema = z
+  .object({
+    id: idSchema,
+    kind: z.enum(["preview", "export"]),
+    status: z.enum(["queued", "completed", "failed"]),
+    subtitleFormat: z.enum(["srt", "vtt", "burn-in", "none"]),
+    fileName: z.string().min(1).max(240).nullable(),
+    error: z.string().max(500).nullable(),
   })
   .strict();
 
@@ -57,6 +214,11 @@ export const projectSchema = z
     media: z.array(mediaReferenceSchema),
     tracks: z.array(trackSchema),
     clips: z.array(clipSchema),
+    captionTracks: z.array(captionTrackSchema).optional(),
+    captions: z.array(captionSegmentSchema).optional(),
+    transcripts: z.array(transcriptSchema).optional(),
+    analyses: z.array(audioAnalysisSchema).optional(),
+    renders: z.array(renderRequestSchema).optional(),
   })
   .strict();
 
@@ -258,6 +420,11 @@ export type Project = z.infer<typeof projectSchema>;
 export type Clip = z.infer<typeof clipSchema>;
 export type Track = z.infer<typeof trackSchema>;
 export type MediaReference = z.infer<typeof mediaReferenceSchema>;
+export type CaptionStyle = z.infer<typeof captionStyleSchema>;
+export type CaptionSegment = z.infer<typeof captionSegmentSchema>;
+export type CaptionTrack = z.infer<typeof captionTrackSchema>;
+export type Transcript = z.infer<typeof transcriptSchema>;
+export type AudioAnalysis = z.infer<typeof audioAnalysisSchema>;
 export type ProjectView = z.infer<typeof projectViewSchema>;
 export type TimelineView = z.infer<typeof timelineSchema>;
 
@@ -280,6 +447,32 @@ export const supportedTools = [
   "redo",
   "createCheckpoint",
   "restoreCheckpoint",
+  "setClipSpeed",
+  "setTransform",
+  "setOpacity",
+  "setColor",
+  "applyEffect",
+  "removeEffect",
+  "setTransition",
+  "setVolume",
+  "setFades",
+  "addKeyframe",
+  "addCaptionTrack",
+  "setCaptionStyle",
+  "addTextOverlay",
+  "addCaptionSegment",
+  "attachTranscript",
+  "generateCaptions",
+  "editCaptionText",
+  "exportSubtitles",
+  "syncCutsToBeats",
+  "storeAudioAnalysis",
+  "alignLyrics",
+  "importMedia",
+  "previewVideo",
+  "exportVideo",
+  "completeRender",
+  "separateVocals",
 ] as const;
 
 export type SupportedTool = (typeof supportedTools)[number];
